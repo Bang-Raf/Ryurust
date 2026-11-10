@@ -49,8 +49,11 @@ pub unsafe extern "C" fn ryu_shader_cache_parse_entries(
     let slice = slice::from_raw_parts(data, len);
     let out_slice = slice::from_raw_parts_mut(out_entries, max_entries);
 
+    // Negative results match `ryu_shader_cache_validate_toc`'s header error codes.
     match parse_toc_entries(slice, out_slice) {
         Ok(count) => count as i32,
+        Err(TocError::InvalidMagic) => -2,
+        Err(TocError::UnsupportedVersion) => -3,
         Err(_) => -1,
     }
 }

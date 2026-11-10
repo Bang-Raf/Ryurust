@@ -23,8 +23,10 @@ struct RefSyncptIncrManager {
 
 impl RefSyncptIncrManager {
     fn increment(&mut self, id: u32) {
+        // Rust uses a reserved sentinel id for untracked increments instead of
+        // C#'s 0 (which collides with real handle 0); it never matches a handle.
         self.incrs.push(RefSyncptIncr {
-            id: 0,
+            id: u32::MAX,
             class_id: 0,
             syncpt_id: id,
             done: true,
@@ -243,4 +245,49 @@ fn test_step2_massive_random_interleaved_simulation() {
     let drained = rust_mgr.drain_flushed(&mut rust_flushed);
     assert_eq!(drained, total_flushed);
     assert_eq!(rust_flushed, ref_mgr.flushed);
+}
+
+#[test]
+fn test_plain_increment_not_completed_by_handle_zero() {
+    // With id 0 on plain increments, signal_done(0) could match the wrong
+    // entry. Here handle 0 is pending behind nothing; a plain increment queued
+    // after it must flush only once handle 0 completes.
+    let seq = SyncptSequencer::new();
+    let h0 = seq.increment_when_done(0xB0, 7);
+    assert_eq!(h0, 0);
+    seq.increment(8);
+    assert_eq!(seq.pending_count(), 2);
+    seq.signal_done(h0);
+    let mut out = [0u32; 2];
+    assert_eq!(seq.drain_flushed(&mut out), 2);
+    assert_eq!(out, [7, 8]);
+}
+
+#[test]
+fn test_reverse_order_completion_large() {
+    const N: u32 = 20_000;
+    let mut ref_mgr = RefSyncptIncrManager::default();
+    let seq = SyncptSequencer::new();
+    let handles: Vec<u32> = (0..N)
+        .map(|i| {
+            let r = ref_mgr.increment_when_done(1, i);
+            let h = seq.increment_when_done(1, i);
+            assert_eq!(h, r);
+            if i % 3 == 0 {
+                ref_mgr.increment(i + 100_000);
+                seq.increment(i + 100_000);
+            }
+            h
+        })
+        .collect();
+    for &h in handles.iter().rev() {
+        ref_mgr.signal_done(h);
+        seq.signal_done(h);
+        // Re-signalling an already-done handle is a no-op.
+        seq.signal_done(h);
+    }
+    assert_eq!(seq.pending_count(), 0);
+    let mut out = vec![0u32; ref_mgr.flushed.len()];
+    assert_eq!(seq.drain_flushed(&mut out), ref_mgr.flushed.len());
+    assert_eq!(out, ref_mgr.flushed);
 }

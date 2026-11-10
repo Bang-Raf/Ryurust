@@ -31,7 +31,9 @@ impl RefCircularSpanPool {
             return None;
         }
 
-        let wraparound = self.producer_ptr + size >= self.size;
+        // Deliberate deviation from C# (`>=`): an exactly-fitting payload is not
+        // wrapped to offset 0 (matches the fixed GalSpanPool).
+        let wraparound = self.producer_ptr + size > self.size;
         let index = if wraparound { 0 } else { self.producer_ptr };
 
         let consumer = self.consumer_ptr;
@@ -211,4 +213,49 @@ fn test_step2_spsc_multithreaded_fifo_order() {
             "Strict FIFO order must be preserved across threads"
         );
     }
+}
+
+#[test]
+fn test_span_pool_exact_fit_at_end_not_wrapped() {
+    const POOL_SIZE: usize = 64;
+    let pool = GalSpanPool::new(POOL_SIZE);
+
+    // Fill 48 bytes, consume them so the consumer sits at 48.
+    let first = [1u8; 48];
+    assert_eq!(pool.try_insert(&first), 0);
+    let p = pool.get_consumer_ptr(48);
+    assert!(!p.is_null());
+    pool.advance_consumer(48);
+
+    // 16 bytes end exactly at the pool end: must be placed at 48, not 0.
+    let exact = [2u8; 16];
+    assert_eq!(pool.try_insert(&exact), 48);
+
+    // Next insert must wrap to 0 (consumer is at 48, so 0..8 is free).
+    let next = [3u8; 8];
+    assert_eq!(pool.try_insert(&next), 0);
+
+    // Consumer sees the exact-fit payload at 48, then wraps to 0.
+    let p = pool.get_consumer_ptr(16);
+    assert_eq!(p, unsafe { pool.pool_buffer_ptr().add(48) });
+    // SAFETY: p points to 16 readable bytes inside the pool.
+    assert_eq!(unsafe { std::slice::from_raw_parts(p, 16) }, &exact);
+    pool.advance_consumer(16);
+
+    let p = pool.get_consumer_ptr(8);
+    assert_eq!(p, pool.pool_buffer_ptr());
+    // SAFETY: p points to 8 readable bytes inside the pool.
+    assert_eq!(unsafe { std::slice::from_raw_parts(p, 8) }, &next);
+    pool.advance_consumer(8);
+}
+
+#[test]
+fn test_span_pool_exact_fit_rejected_when_consumer_ahead() {
+    const POOL_SIZE: usize = 64;
+    let pool = GalSpanPool::new(POOL_SIZE);
+    // Producer at 40, consumer still at 0: a 24-byte payload fits exactly at
+    // the end; the following insert must be rejected (consumer at 0 blocks wrap).
+    assert_eq!(pool.try_insert(&[1u8; 40]), 0);
+    assert_eq!(pool.try_insert(&[2u8; 24]), 40);
+    assert_eq!(pool.try_insert(&[3u8; 1]), -1);
 }

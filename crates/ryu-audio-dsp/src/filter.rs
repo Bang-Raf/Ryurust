@@ -1,10 +1,26 @@
+use crate::dsp::{InPlace, SampleIo, Split};
+
+/// Biquad coefficients, layout-compatible with Ryujinx's `BiquadFilterParameter2`.
+///
+/// The filter computes
+/// `y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] + denominator[0]*y[n-1] + denominator[1]*y[n-2]`.
+///
+/// **The feedback coefficients are added, not subtracted**: for the textbook transfer function
+/// `H(z) = (b0 + b1 z^-1 + b2 z^-2) / (1 + a1 z^-1 + a2 z^-2)` you must store
+/// `denominator = [-a1, -a2]`. This matches Ryujinx, which passes the guest's `Denominator`
+/// array through unchanged and adds it in `BiquadFilterHelper` (`output * b1` / `State2 * b1`
+/// there; note the C# names the numerator `a*` and the denominator `b*`, the opposite of the
+/// textbook convention used here). Storing un-negated `a1`/`a2` gives a different, usually
+/// unstable, filter.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BiquadFilterParameter {
     pub enable: u8,
     pub _reserved: [u8; 3],
-    pub numerator: [f32; 3],   // b0, b1, b2
-    pub denominator: [f32; 2], // a1, a2
+    /// Feed-forward coefficients `b0, b1, b2`.
+    pub numerator: [f32; 3],
+    /// Feedback coefficients **negated**: `[-a1, -a2]`.
+    pub denominator: [f32; 2],
 }
 
 impl Default for BiquadFilterParameter {
@@ -51,7 +67,26 @@ pub fn process_biquad_filter_df2(
     output: &mut [f32],
     input: &[f32],
 ) {
-    let count = output.len().min(input.len());
+    biquad_df2_io(parameter, state, &mut Split::new(output, input));
+}
+
+/// [`process_biquad_filter_df2`] with `buffer` as both input and output.
+#[inline]
+pub fn process_biquad_filter_df2_in_place(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    buffer: &mut [f32],
+) {
+    biquad_df2_io(parameter, state, &mut InPlace(buffer));
+}
+
+#[inline(always)]
+pub(crate) fn biquad_df2_io<I: SampleIo>(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    io: &mut I,
+) {
+    let count = io.len();
     let a0 = parameter.numerator[0];
     let a1 = parameter.numerator[1];
     let a2 = parameter.numerator[2];
@@ -63,13 +98,13 @@ pub fn process_biquad_filter_df2(
     let mut s1 = state.state1;
 
     for i in 0..count {
-        let in_samp = input[i];
+        let in_samp = io.input(i);
         let out_samp = in_samp * a0 + s0;
 
         s0 = in_samp * a1 + out_samp * b1 + s1;
         s1 = in_samp * a2 + out_samp * b2;
 
-        output[i] = out_samp;
+        *io.output(i) = out_samp;
     }
 
     state.state0 = s0;
@@ -86,7 +121,28 @@ pub fn process_biquad_filter_and_mix_df1(
     input: &[f32],
     volume: f32,
 ) {
-    let count = output.len().min(input.len());
+    biquad_and_mix_df1_io(parameter, state, &mut Split::new(output, input), volume);
+}
+
+/// [`process_biquad_filter_and_mix_df1`] with `buffer` as both input and output.
+#[inline]
+pub fn process_biquad_filter_and_mix_df1_in_place(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    buffer: &mut [f32],
+    volume: f32,
+) {
+    biquad_and_mix_df1_io(parameter, state, &mut InPlace(buffer), volume);
+}
+
+#[inline(always)]
+pub(crate) fn biquad_and_mix_df1_io<I: SampleIo>(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    io: &mut I,
+    volume: f32,
+) {
+    let count = io.len();
     let a0 = parameter.numerator[0];
     let a1 = parameter.numerator[1];
     let a2 = parameter.numerator[2];
@@ -100,7 +156,7 @@ pub fn process_biquad_filter_and_mix_df1(
     let mut s3 = state.state3;
 
     for i in 0..count {
-        let in_samp = input[i];
+        let in_samp = io.input(i);
         let out_samp = in_samp * a0 + s0 * a1 + s1 * a2 + s2 * b1 + s3 * b2;
 
         s1 = s0;
@@ -108,7 +164,7 @@ pub fn process_biquad_filter_and_mix_df1(
         s3 = s2;
         s2 = out_samp;
 
-        output[i] += round_half_to_even(out_samp * volume);
+        *io.output(i) += round_half_to_even(out_samp * volume);
     }
 
     state.state0 = s0;
@@ -128,7 +184,36 @@ pub fn process_biquad_filter_and_mix_ramp_df1(
     volume0: f32,
     volume1: f32,
 ) -> f32 {
-    let count = output.len().min(input.len());
+    biquad_and_mix_ramp_df1_io(
+        parameter,
+        state,
+        &mut Split::new(output, input),
+        volume0,
+        volume1,
+    )
+}
+
+/// [`process_biquad_filter_and_mix_ramp_df1`] with `buffer` as both input and output.
+#[inline]
+pub fn process_biquad_filter_and_mix_ramp_df1_in_place(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    buffer: &mut [f32],
+    volume0: f32,
+    volume1: f32,
+) -> f32 {
+    biquad_and_mix_ramp_df1_io(parameter, state, &mut InPlace(buffer), volume0, volume1)
+}
+
+#[inline(always)]
+pub(crate) fn biquad_and_mix_ramp_df1_io<I: SampleIo>(
+    parameter: &BiquadFilterParameter,
+    state: &mut BiquadFilterState,
+    io: &mut I,
+    volume0: f32,
+    volume1: f32,
+) -> f32 {
+    let count = io.len();
     if count == 0 {
         return 0.0;
     }
@@ -150,7 +235,7 @@ pub fn process_biquad_filter_and_mix_ramp_df1(
     let mut mix_state = 0.0f32;
 
     for i in 0..count {
-        let in_samp = input[i];
+        let in_samp = io.input(i);
         let out_samp = in_samp * a0 + s0 * a1 + s1 * a2 + s2 * b1 + s3 * b2;
 
         s1 = s0;
@@ -159,7 +244,7 @@ pub fn process_biquad_filter_and_mix_ramp_df1(
         s2 = out_samp;
 
         mix_state = round_half_to_even(out_samp * volume);
-        output[i] += mix_state;
+        *io.output(i) += mix_state;
         volume += ramp;
     }
 

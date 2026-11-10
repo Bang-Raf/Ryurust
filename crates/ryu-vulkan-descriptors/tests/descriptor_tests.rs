@@ -162,3 +162,65 @@ fn test_c_abi_lifecycle() {
         ryu_vulkan_descriptors_destroy(handle);
     }
 }
+
+#[test]
+fn test_filter_buffers_capacity_smaller_than_dirty_keeps_rest_dirty() {
+    let mut state = RyuDescriptorState::new();
+    // 6 dirty bindings spread across both words, plus one redundant binding.
+    let bindings = [1usize, 3, 40, 64, 65, 89];
+    for &b in &bindings {
+        assert!(state.update_buffer(SET_UNIFORM, b, 0x1000 + b as u64, 0, 256));
+    }
+    // Binding 10: changed then reverted -> dirty but equal to committed.
+    state.update_buffer(SET_UNIFORM, 10, 0x9, 0, 1);
+    state.update_buffer(SET_UNIFORM, 10, 0, 0, 0);
+
+    let mut emitted = Vec::new();
+    let mut idx = [0u32; 2];
+    let mut infos = [RyuDescriptorBufferInfo::default(); 2];
+    loop {
+        let n = state.filter_redundant_buffers(SET_UNIFORM, &mut idx, &mut infos);
+        if n == 0 {
+            break;
+        }
+        assert!(n <= 2);
+        for i in 0..n {
+            assert_eq!(infos[i].buffer_handle, 0x1000 + idx[i] as u64);
+            emitted.push(idx[i] as usize);
+        }
+    }
+    assert_eq!(emitted, bindings);
+    assert_eq!(state.dirty_uniform, [0, 0]);
+}
+
+#[test]
+fn test_filter_images_capacity_smaller_than_dirty_keeps_rest_dirty() {
+    let mut state = RyuDescriptorState::new();
+    let bindings = [0usize, 63, 64, 200, 319];
+    for &b in &bindings {
+        assert!(state.update_image(SET_TEXTURE, b, 7, 0x2000 + b as u64, 1));
+    }
+
+    let mut idx = [0u32; 3];
+    let mut infos = [RyuDescriptorImageInfo::default(); 3];
+    let n = state.filter_redundant_images(SET_TEXTURE, &mut idx, &mut infos);
+    assert_eq!(n, 3);
+    assert_eq!(&idx[..3], &[0, 63, 64]);
+    // 200 and 319 must still be dirty.
+    assert_eq!(state.dirty_textures[3], 1u64 << (200 - 192));
+    assert_eq!(state.dirty_textures[4], 1u64 << (319 - 256));
+    assert_eq!(state.dirty_textures[..3], [0, 0, 0]);
+
+    let n = state.filter_redundant_images(SET_TEXTURE, &mut idx, &mut infos);
+    assert_eq!(n, 2);
+    assert_eq!(&idx[..2], &[200, 319]);
+    assert_eq!(state.dirty_textures, [0; 5]);
+
+    // Zero-capacity output emits nothing and loses nothing.
+    assert!(state.update_image(SET_IMAGE, 5, 1, 2, 3));
+    assert_eq!(
+        state.filter_redundant_images(SET_IMAGE, &mut [], &mut []),
+        0
+    );
+    assert_eq!(state.dirty_images[0], 1 << 5);
+}

@@ -2,9 +2,21 @@ use crate::types::{
     DirEntryHeader, FileEntryHeader, FileInfo, RomFsHeader, ROMFS_ENTRY_EMPTY, ROMFS_HEADER_SIZE,
 };
 
+/// Seed of the Switch RomFS path hash.
+pub const ROMFS_HASH_SEED: u32 = 123_456_789;
+
+/// Switch RomFS directory/file entry hash: `hash = parent ^ 123456789`, then for each
+/// name byte `hash = rotate_right(hash, 5) ^ byte`; the bucket is `hash % bucket_count`.
+///
+/// Source: LibHac `RomEntryKey.GetRomHashCode` in `src/LibHac/IO/RomFs/RomFsEntries.cs`
+/// (`uint hash = 123456789 ^ (uint)parent; ... hash = c ^ ((hash << 27) | (hash >> 5));`)
+/// and `RomFsDictionary.cs` (`hashCode % Buckets.Length`), see
+/// <https://git.kintoki.dev/archive/LibHac_Ryubing/commit/5457a81068b00791920c9253c33635248dd9329e>
+/// (mirror of Thealexbarney/LibHac). Matches `romfs_calc_path_hash` in yuzu/eden's
+/// `src/core/file_sys/fsmitm_romfsbuild.cpp` (ported from Atmosphere).
 #[inline(always)]
 pub fn romfs_hash(parent: u32, name: &[u8]) -> u32 {
-    let mut hash = parent ^ 12345678u32;
+    let mut hash = parent ^ ROMFS_HASH_SEED;
     for &b in name {
         hash = hash.rotate_right(5) ^ (b as u32);
     }
@@ -41,6 +53,46 @@ fn read_u64_le(buf: &[u8], offset: usize) -> Option<u64> {
     ]))
 }
 
+/// Validated byte ranges of the four RomFS metadata tables, so a [`RomFsReader`] can be
+/// rebuilt over the same buffer without re-parsing the header.
+#[derive(Copy, Clone, Debug)]
+struct TableLayout {
+    header: RomFsHeader,
+    dir_hash: (usize, usize),
+    dir_meta: (usize, usize),
+    file_hash: (usize, usize),
+    file_meta: (usize, usize),
+}
+
+impl TableLayout {
+    fn parse(data: &[u8]) -> Option<Self> {
+        let header = RomFsHeader::parse(data)?;
+        if header.header_size < ROMFS_HEADER_SIZE as u64 {
+            return None;
+        }
+
+        let range = |off: u64, sz: u64| -> Option<(usize, usize)> {
+            let start = usize::try_from(off).ok()?;
+            let end = start.checked_add(usize::try_from(sz).ok()?)?;
+            (end <= data.len()).then_some((start, end))
+        };
+
+        let layout = Self {
+            header,
+            dir_hash: range(header.dir_hash_offset, header.dir_hash_size)?,
+            dir_meta: range(header.dir_meta_offset, header.dir_meta_size)?,
+            file_hash: range(header.file_hash_offset, header.file_hash_size)?,
+            file_meta: range(header.file_meta_offset, header.file_meta_size)?,
+        };
+
+        let buckets = |(start, end): (usize, usize)| (end - start) / 4;
+        if buckets(layout.dir_hash) == 0 || buckets(layout.file_hash) == 0 {
+            return None;
+        }
+        Some(layout)
+    }
+}
+
 pub struct RomFsReader<'a> {
     pub data: &'a [u8],
     pub header: RomFsHeader,
@@ -54,44 +106,25 @@ pub struct RomFsReader<'a> {
 
 impl<'a> RomFsReader<'a> {
     pub fn from_bytes(data: &'a [u8]) -> Option<Self> {
-        let header = RomFsHeader::parse(data)?;
-        if header.header_size < ROMFS_HEADER_SIZE as u64 {
-            return None;
-        }
+        let layout = TableLayout::parse(data)?;
+        Some(Self::with_layout(data, &layout))
+    }
 
-        let slice_range = |off: u64, sz: u64| -> Option<&'a [u8]> {
-            let start = off as usize;
-            let len = sz as usize;
-            let end = start.checked_add(len)?;
-            if end <= data.len() {
-                Some(&data[start..end])
-            } else {
-                None
-            }
-        };
-
-        let dir_hash = slice_range(header.dir_hash_offset, header.dir_hash_size)?;
-        let dir_meta = slice_range(header.dir_meta_offset, header.dir_meta_size)?;
-        let file_hash = slice_range(header.file_hash_offset, header.file_hash_size)?;
-        let file_meta = slice_range(header.file_meta_offset, header.file_meta_size)?;
-
-        let dir_bucket_count = dir_hash.len() / 4;
-        let file_bucket_count = file_hash.len() / 4;
-
-        if dir_bucket_count == 0 || file_bucket_count == 0 {
-            return None;
-        }
-
-        Some(Self {
+    /// Builds a reader from a layout previously validated against `data`.
+    #[inline]
+    fn with_layout(data: &'a [u8], layout: &TableLayout) -> Self {
+        let dir_hash = &data[layout.dir_hash.0..layout.dir_hash.1];
+        let file_hash = &data[layout.file_hash.0..layout.file_hash.1];
+        Self {
             data,
-            header,
+            header: layout.header,
             dir_hash,
-            dir_meta,
+            dir_meta: &data[layout.dir_meta.0..layout.dir_meta.1],
             file_hash,
-            file_meta,
-            dir_bucket_count,
-            file_bucket_count,
-        })
+            file_meta: &data[layout.file_meta.0..layout.file_meta.1],
+            dir_bucket_count: dir_hash.len() / 4,
+            file_bucket_count: file_hash.len() / 4,
+        }
     }
 
     #[inline]
@@ -299,7 +332,8 @@ impl<'a> RomFsReader<'a> {
 
 pub struct RyuRomFs {
     metadata: Vec<u8>,
-    header: RomFsHeader,
+    /// Table ranges validated once at construction, so lookups don't re-parse.
+    layout: TableLayout,
     dir_count: usize,
     file_count: usize,
 }
@@ -309,26 +343,31 @@ impl RyuRomFs {
         let header = RomFsHeader::parse(bytes)?;
         let required_len = header.data_offset.min(bytes.len() as u64) as usize;
         let metadata = bytes[..required_len].to_vec();
-        let reader = RomFsReader::from_bytes(&metadata)?;
-        let (dir_count, file_count) = reader.count_entries();
+        let layout = TableLayout::parse(&metadata)?;
+        let (dir_count, file_count) = RomFsReader::with_layout(&metadata, &layout).count_entries();
 
         Some(Self {
             metadata,
-            header,
+            layout,
             dir_count,
             file_count,
         })
     }
 
+    /// A reader over the owned metadata (cheap: no header parsing or validation).
+    #[inline]
+    pub fn reader(&self) -> RomFsReader<'_> {
+        RomFsReader::with_layout(&self.metadata, &self.layout)
+    }
+
     #[inline]
     pub fn find_file(&self, path: &str) -> Option<FileInfo> {
-        let reader = RomFsReader::from_bytes(&self.metadata)?;
-        reader.find_file(path)
+        self.reader().find_file(path)
     }
 
     #[inline]
     pub fn header(&self) -> &RomFsHeader {
-        &self.header
+        &self.layout.header
     }
 
     #[inline]

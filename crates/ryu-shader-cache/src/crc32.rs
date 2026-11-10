@@ -1,5 +1,8 @@
-const CRC32_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+/// CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320) slicing-by-8 tables.
+/// `CRC32_TABLES[0]` is the classic bytewise table; `CRC32_TABLES[k][i]` is the CRC of
+/// byte `i` followed by `k` zero bytes.
+const CRC32_TABLES: [[u32; 256]; 8] = {
+    let mut tables = [[0u32; 256]; 8];
     let mut i = 0;
     while i < 256 {
         let mut crc = i as u32;
@@ -12,17 +15,42 @@ const CRC32_TABLE: [u32; 256] = {
             }
             j += 1;
         }
-        table[i] = crc;
+        tables[0][i] = crc;
         i += 1;
     }
-    table
+    let mut k = 1;
+    while k < 8 {
+        let mut i = 0;
+        while i < 256 {
+            let prev = tables[k - 1][i];
+            tables[k][i] = (prev >> 8) ^ tables[0][(prev & 0xFF) as usize];
+            i += 1;
+        }
+        k += 1;
+    }
+    tables
 };
 
 pub fn compute_crc32(data: &[u8]) -> u32 {
+    let t = &CRC32_TABLES;
     let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
+
+    let mut chunks = data.chunks_exact(8);
+    for c in &mut chunks {
+        let lo = crc ^ u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+        let hi = u32::from_le_bytes([c[4], c[5], c[6], c[7]]);
+        crc = t[7][(lo & 0xFF) as usize]
+            ^ t[6][((lo >> 8) & 0xFF) as usize]
+            ^ t[5][((lo >> 16) & 0xFF) as usize]
+            ^ t[4][(lo >> 24) as usize]
+            ^ t[3][(hi & 0xFF) as usize]
+            ^ t[2][((hi >> 8) & 0xFF) as usize]
+            ^ t[1][((hi >> 16) & 0xFF) as usize]
+            ^ t[0][(hi >> 24) as usize];
+    }
+    for &b in chunks.remainder() {
         let idx = ((crc ^ (b as u32)) & 0xFF) as usize;
-        crc = (crc >> 8) ^ CRC32_TABLE[idx];
+        crc = (crc >> 8) ^ t[0][idx];
     }
     !crc
 }

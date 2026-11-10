@@ -248,3 +248,126 @@ fn test_step2_bc7_modes_and_partitions() {
         assert_eq!(p, 0, "BC7 invalid mode must fill 0");
     }
 }
+
+// =========================================================================
+// Alignment safety: surface decoders must accept arbitrarily aligned output.
+// =========================================================================
+
+fn pseudo_random_bytes(len: usize, mut state: u64) -> Vec<u8> {
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect()
+}
+
+/// Builds the expected surface from per-block decodes: `block_texels(block_index)`
+/// returns the 16 texels of a block as little-endian byte arrays.
+fn reference_surface<const N: usize>(
+    width: usize,
+    height: usize,
+    mut block_texels: impl FnMut(usize) -> [[u8; N]; 16],
+) -> Vec<u8> {
+    let blocks_x = width.div_ceil(4);
+    let mut out = vec![0u8; width * height * N];
+    for by in 0..height.div_ceil(4) {
+        for bx in 0..blocks_x {
+            let texels = block_texels(by * blocks_x + bx);
+            for ty in 0..4 {
+                for tx in 0..4 {
+                    let (x, y) = (bx * 4 + tx, by * 4 + ty);
+                    if x < width && y < height {
+                        let o = (y * width + x) * N;
+                        out[o..o + N].copy_from_slice(&texels[ty * 4 + tx]);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Decodes into a destination slice offset by `offset` bytes inside a larger Vec.
+fn decode_misaligned(
+    dst_len: usize,
+    offset: usize,
+    decode: impl FnOnce(&mut [u8]) -> Result<(), &'static str>,
+) -> Vec<u8> {
+    let mut backing = vec![0u8; dst_len + offset];
+    let dst = &mut backing[offset..];
+    assert_ne!(dst.as_ptr() as usize % 2, 0, "slice must be misaligned");
+    decode(dst).unwrap();
+    dst.to_vec()
+}
+
+#[test]
+fn test_misaligned_destination_all_formats() {
+    // 7x5 exercises clipped edge blocks; 8x8 is fully covered.
+    for &(w, h) in &[(7usize, 5usize), (8, 8)] {
+        let blocks = w.div_ceil(4) * h.div_ceil(4);
+        let src8 = pseudo_random_bytes(blocks * 8 + 1, 0xB1);
+        let src16 = pseudo_random_bytes(blocks * 16 + 1, 0xB7);
+        // Source slices are misaligned too.
+        let (s8, s16) = (&src8[1..], &src16[1..]);
+        let blk8 = |i: usize| -> &[u8; 8] { s8[i * 8..i * 8 + 8].try_into().unwrap() };
+        let blk16 = |i: usize| -> &[u8; 16] { s16[i * 16..i * 16 + 16].try_into().unwrap() };
+
+        let le32 = |t: [u32; 16]| t.map(u32::to_le_bytes);
+
+        let got = decode_misaligned(w * h * 4, 1, |d| decode_bc1_surface(s8, d, w, h));
+        let want = reference_surface(w, h, |i| {
+            let mut t = [0u32; 16];
+            decode_bc1_block(blk8(i), &mut t);
+            le32(t)
+        });
+        assert_eq!(got, want, "BC1 {w}x{h}");
+
+        let got = decode_misaligned(w * h * 4, 1, |d| decode_bc2_surface(s16, d, w, h));
+        let want = reference_surface(w, h, |i| {
+            let mut t = [0u32; 16];
+            decode_bc2_block(blk16(i), &mut t);
+            le32(t)
+        });
+        assert_eq!(got, want, "BC2 {w}x{h}");
+
+        let got = decode_misaligned(w * h * 4, 1, |d| decode_bc3_surface(s16, d, w, h));
+        let want = reference_surface(w, h, |i| {
+            let mut t = [0u32; 16];
+            decode_bc3_block(blk16(i), &mut t);
+            le32(t)
+        });
+        assert_eq!(got, want, "BC3 {w}x{h}");
+
+        let got = decode_misaligned(w * h * 4, 1, |d| decode_bc7_surface(s16, d, w, h));
+        let want = reference_surface(w, h, |i| {
+            let mut t = [0u32; 16];
+            decode_bc7_block(Block::from_slice(blk16(i)), &mut t);
+            le32(t)
+        });
+        assert_eq!(got, want, "BC7 {w}x{h}");
+
+        for signed in [false, true] {
+            let got =
+                decode_misaligned(w * h * 8, 1, |d| decode_bc6h_surface(s16, d, w, h, signed));
+            let want = reference_surface(w, h, |i| {
+                let mut t = [0u64; 16];
+                decode_bc6h_block(Block::from_slice(blk16(i)), &mut t, signed);
+                t.map(u64::to_le_bytes)
+            });
+            assert_eq!(got, want, "BC6H signed={signed} {w}x{h}");
+
+            let got = decode_misaligned(w * h * 2, 1, |d| {
+                decode_bc5_surface_stride(s16, d, w, h, w, signed)
+            });
+            let want = reference_surface(w, h, |i| {
+                let mut t = [0u16; 16];
+                decode_bc5_block(blk16(i), &mut t, signed);
+                t.map(u16::to_le_bytes)
+            });
+            assert_eq!(got, want, "BC5 signed={signed} {w}x{h}");
+        }
+    }
+}

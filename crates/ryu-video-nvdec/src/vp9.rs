@@ -1,5 +1,7 @@
-// VP9 Frame Pipeline & Surface Reconstruction
-// Combines prediction, IDCT transform acceleration, and in-loop deblocking filter
+// Synthetic DC-only surface reconstruction (NOT a VP9 bitstream decoder).
+// `decode_frame` reads a toy bool-coded stream: per 16x16 block a skip flag, a has-coeffs
+// flag and three 8-bit DC values (Y, U, V); it applies DC-only 8x8 IDCTs and then the VP9
+// loop filter. Real VP9 mode/coefficient parsing and prediction are not implemented.
 
 use crate::entropy::BoolDecoder;
 use crate::idct::idct8x8_add;
@@ -153,14 +155,17 @@ impl Vp9DecoderPipeline {
                             }
                         }
 
-                        // Apply to chroma
+                        // Chroma: U and V each carry their own 8-bit DC value.
+                        let u_dc = (reader.read_literal(8) as i32) - 128;
+                        let v_dc = (reader.read_literal(8) as i32) - 128;
                         let cx = bx * 8;
                         let cy = by * 8;
                         if cx + 8 <= width / 2 && cy + 8 <= uv_height {
-                            let u_offset = cy * uv_stride + cx;
-                            let v_offset = cy * uv_stride + cx;
-                            idct8x8_add(&coeffs, &mut u_out[u_offset..], uv_stride, 1);
-                            idct8x8_add(&coeffs, &mut v_out[v_offset..], uv_stride, 1);
+                            let offset = cy * uv_stride + cx;
+                            coeffs[0] = u_dc;
+                            idct8x8_add(&coeffs, &mut u_out[offset..], uv_stride, 1);
+                            coeffs[0] = v_dc;
+                            idct8x8_add(&coeffs, &mut v_out[offset..], uv_stride, 1);
                         }
                     }
                 }

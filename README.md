@@ -20,7 +20,7 @@ when a library isn't present.
 | | |
 | :--- | :--- |
 | Crates | 32 |
-| Unit tests | 208, all passing (`cargo test --workspace`) |
+| Unit tests | 262, all passing (`cargo test --workspace`) |
 | Benchmarks | 121 Criterion benchmarks, one suite per crate ([results](docs/BENCHMARKS.md)) |
 | Wired into Ryubing | 13 crates have C# wrappers; 10 of those are called from emulator code |
 | Platforms | Built and tested on x86_64 Linux. AVX2 paths are chosen at runtime with scalar fallbacks. |
@@ -74,16 +74,16 @@ caveats are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 | Benchmark | Input | Time | Throughput |
 | :--- | :--- | ---: | ---: |
-| `texture_bcn/bc1` | 1920×1080 | 1.67 ms | 4.64 GiB/s |
-| `texture_bcn/bc7` | 1920×1080 | 13.2 ms | 598 MiB/s |
-| `texture_astc/decode_par/4x4` | 1920×1080, 8 threads | 13.3 ms | 596 MiB/s |
-| `tegra_swizzle/deswizzle_seq` | RGBA8 1920×1080 | 520 µs | 14.9 GiB/s |
-| `memory_pagetable/read/random_256MiB` | 4096 random lookups | 4.29 µs | 955 M lookups/s |
-| `gpu_gpfifo/parse_pushbuffer_chunk` | ~50k methods | 44.9 µs | 1.11 G methods/s |
-| `audio_mixer/mix_batch` | 128 voices × 240 samples | 2.93 µs | 10.5 G samples/s |
-| `maxwell_state/scan_changes` (AVX2) | 14 KiB register file | 131 ns | 102 GiB/s |
-| `maxwell_state/scan_changes_scalar` | 14 KiB register file | 1.12 µs | 12.0 GiB/s |
-| `storage_fs/aes_ctr_decrypt` | 1 MiB | 405 µs | 2.41 GiB/s |
+| `texture_bcn/bc1` | 1920×1080 | 1.69 ms | 4.58 GiB/s |
+| `texture_bcn/bc7` | 1920×1080 | 13.3 ms | 593 MiB/s |
+| `tegra_swizzle/deswizzle_seq` | RGBA8 1920×1080 | 521 µs | 14.8 GiB/s |
+| `memory_pagetable/read/random_256MiB` | 4096 random lookups | 4.24 µs | 967 M lookups/s |
+| `gpu_gpfifo/parse_pushbuffer_chunk` | ~50k methods | 44.5 µs | 1.12 G methods/s |
+| `audio_mixer/mix_batch` | 128 voices × 240 samples | 2.47 µs | 12.5 G samples/s |
+| `maxwell_state/scan_changes` (AVX2) | 14 KiB register file | 132 ns | 101 GiB/s |
+| `maxwell_state/scan_changes_scalar` | 14 KiB register file | 1.14 µs | 11.7 GiB/s |
+| `shader_cache/crc32` | 64 KiB | 29.5 µs | 2.07 GiB/s |
+| `storage_fs/aes_ctr_decrypt` | 1 MiB | 422 µs | 2.32 GiB/s |
 
 These numbers measure the Rust code by itself. **There is no measured
 comparison with the C# implementation yet**, so they say nothing about

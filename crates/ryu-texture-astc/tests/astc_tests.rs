@@ -169,3 +169,52 @@ fn test_dual_sequential_and_parallel_consistency() {
         "Sequential and parallel output must be bit-identical"
     );
 }
+
+#[test]
+fn test_invalid_block_yields_error_colour() {
+    let mut out_pixels = [0u32; 16];
+    assert!(!decompress_block(&[0u8; 16], &mut out_pixels, 4, 4));
+    assert!(out_pixels.iter().all(|&p| p == ASTC_ERROR_COLOR));
+    // Opaque magenta: R = 0xFF, G = 0x00, B = 0xFF, A = 0xFF.
+    assert_eq!(ASTC_ERROR_COLOR.to_le_bytes(), [0xFF, 0x00, 0xFF, 0xFF]);
+}
+
+/// Regression: this block's colour integer sequence decodes to more values than the
+/// 32-entry colour buffer holds, which used to panic with an out-of-bounds index.
+#[test]
+fn test_oversized_color_sequence_does_not_panic() {
+    let block: [u8; 16] = [
+        0x0f, 0xbb, 0x16, 0x3c, 0x20, 0x3a, 0x7a, 0x94, 0x71, 0x75, 0xfd, 0x56, 0x96, 0x97, 0xbe,
+        0x4f,
+    ];
+    let mut out_pixels = [0u32; 16];
+    let ok = decompress_block(&block, &mut out_pixels, 4, 4);
+    assert!(!ok, "oversized colour encoding must be rejected");
+    assert!(out_pixels.iter().all(|&p| p == ASTC_ERROR_COLOR));
+}
+
+struct XorShift64(u64);
+impl XorShift64 {
+    fn next_u64(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+#[test]
+fn test_random_blocks_never_panic() {
+    for &(bw, bh) in &[(4usize, 4usize), (8, 8)] {
+        let mut rng = XorShift64(0x9E37_79B9_7F4A_7C15 ^ ((bw as u64) << 8 | bh as u64));
+        let mut out_pixels = [0u32; 144];
+        for _ in 0..100_000 {
+            let mut block = [0u8; 16];
+            block[..8].copy_from_slice(&rng.next_u64().to_le_bytes());
+            block[8..].copy_from_slice(&rng.next_u64().to_le_bytes());
+            if !decompress_block(&block, &mut out_pixels, bw, bh) {
+                assert!(out_pixels[..bw * bh].iter().all(|&p| p == ASTC_ERROR_COLOR));
+            }
+        }
+    }
+}

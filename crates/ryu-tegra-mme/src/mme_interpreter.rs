@@ -14,7 +14,15 @@ pub struct MmeInterpreter {
     pipe_op: i32,
     ignore_exit_flag: bool,
     pc: usize,
+    last_run_hit_step_limit: bool,
 }
+
+/// Maximum number of instructions one macro invocation may execute before it is treated as
+/// runaway and stopped (16,777,216). Real macros run a handful of instructions per FIFO
+/// parameter; even a macro consuming hundreds of thousands of parameters stays far below
+/// this, while an infinite loop is cut off after a bounded amount of work (tens of
+/// milliseconds in a release build).
+pub const MME_MAX_STEPS: u64 = 1 << 24;
 
 impl Default for MmeInterpreter {
     fn default() -> Self {
@@ -33,6 +41,7 @@ impl MmeInterpreter {
             pipe_op: 0,
             ignore_exit_flag: false,
             pc: 0,
+            last_run_hit_step_limit: false,
         }
     }
 
@@ -45,6 +54,7 @@ impl MmeInterpreter {
         self.pipe_op = 0;
         self.ignore_exit_flag = false;
         self.pc = 0;
+        self.last_run_hit_step_limit = false;
     }
 
     #[inline(always)]
@@ -322,6 +332,10 @@ impl MmeInterpreter {
         !exit
     }
 
+    /// Runs a macro and returns the number of method calls written to `out_calls`.
+    ///
+    /// Execution stops when the macro exits, or after [`MME_MAX_STEPS`] executed
+    /// instructions (a runaway / infinitely looping macro), whichever comes first.
     pub fn execute(
         &mut self,
         code: &[i32],
@@ -329,6 +343,20 @@ impl MmeInterpreter {
         fifo: &[i32],
         registers: &[i32],
         out_calls: &mut [MmeMethodCall],
+    ) -> usize {
+        self.execute_with_step_limit(code, arg0, fifo, registers, out_calls, MME_MAX_STEPS)
+    }
+
+    /// [`execute`](Self::execute) with an explicit instruction budget. When the budget is
+    /// used up the macro is abandoned (the pending delay-slot instruction is not run).
+    pub fn execute_with_step_limit(
+        &mut self,
+        code: &[i32],
+        arg0: i32,
+        fifo: &[i32],
+        registers: &[i32],
+        out_calls: &mut [MmeMethodCall],
+        max_steps: u64,
     ) -> usize {
         if code.is_empty() {
             return 0;
@@ -343,16 +371,27 @@ impl MmeInterpreter {
 
         self.fetch_op_code(code);
 
-        while self.step(
-            code,
-            registers,
-            fifo,
-            &mut fifo_pos,
-            out_calls,
-            &mut out_pos,
-        ) {
+        let mut steps: u64 = 0;
+        loop {
+            if steps >= max_steps {
+                // Runaway macro: stop without running the exit delay slot.
+                self.last_run_hit_step_limit = true;
+                return out_pos;
+            }
+            steps += 1;
+            if !self.step(
+                code,
+                registers,
+                fifo,
+                &mut fifo_pos,
+                out_calls,
+                &mut out_pos,
+            ) {
+                break;
+            }
             if self.pc > code.len() + 1000 {
-                // Safeguard against malformed infinite execution loop
+                // Ran far past the end of the code: only zero opcodes (no exit, no branch)
+                // can follow, so stop early instead of burning the whole step budget.
                 break;
             }
         }
@@ -368,5 +407,11 @@ impl MmeInterpreter {
         );
 
         out_pos
+    }
+
+    /// True if the most recent `execute*` call was stopped by the step budget rather than by
+    /// the macro exiting.
+    pub fn last_run_hit_step_limit(&self) -> bool {
+        self.last_run_hit_step_limit
     }
 }

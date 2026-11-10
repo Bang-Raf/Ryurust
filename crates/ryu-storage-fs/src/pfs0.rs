@@ -48,6 +48,16 @@ pub fn parse_pfs0_header(data: &[u8]) -> Result<Pfs0HeaderInfo, &'static str> {
 
 pub fn get_pfs0_entry(data: &[u8], index: u32) -> Result<(Pfs0FileEntry, &str), &'static str> {
     let header = parse_pfs0_header(data)?;
+    entry_with_header(data, &header, index)
+}
+
+/// Reads entry `index` using an already-validated header, so callers that
+/// walk every entry parse the header only once.
+fn entry_with_header<'a>(
+    data: &'a [u8],
+    header: &Pfs0HeaderInfo,
+    index: u32,
+) -> Result<(Pfs0FileEntry, &'a str), &'static str> {
     if index >= header.num_files {
         return Err("File entry index out of bounds");
     }
@@ -87,7 +97,7 @@ pub fn get_pfs0_entry(data: &[u8], index: u32) -> Result<(Pfs0FileEntry, &str), 
 pub fn find_pfs0_file(data: &[u8], target_name: &str) -> Result<Pfs0FileEntry, &'static str> {
     let header = parse_pfs0_header(data)?;
     for i in 0..header.num_files {
-        let (entry, name) = get_pfs0_entry(data, i)?;
+        let (entry, name) = entry_with_header(data, &header, i)?;
         if name == target_name {
             return Ok(entry);
         }

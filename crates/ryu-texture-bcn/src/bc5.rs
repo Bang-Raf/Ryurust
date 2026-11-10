@@ -1,6 +1,7 @@
 //! BC5 (RGTC2) texture decompression: two 8-bit channels RG (unorm or snorm).
 
 use crate::bc4::decode_bc4_block;
+use crate::block::store_tile;
 
 #[inline(always)]
 pub fn decode_bc5_block(input: &[u8; 16], output_rg: &mut [u16; 16], signed: bool) {
@@ -41,9 +42,6 @@ pub fn decode_bc5_surface_stride(
     }
 
     let mut tile = [0u16; 16];
-    let dst16: &mut [u16] = unsafe {
-        std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u16, stride_pixels * height)
-    };
 
     let mut src_offset = 0;
     for by in 0..blocks_y {
@@ -58,13 +56,7 @@ pub fn decode_bc5_surface_stride(
 
             decode_bc5_block(block_bytes, &mut tile, signed);
 
-            for ty in 0..bh {
-                let dst_row = (y_base + ty) * stride_pixels + x_base;
-                let tile_row = ty * 4;
-                for tx in 0..bw {
-                    dst16[dst_row + tx] = tile[tile_row + tx];
-                }
-            }
+            store_tile(dst, &tile, stride_pixels, x_base, y_base, bw, bh);
         }
     }
     Ok(())

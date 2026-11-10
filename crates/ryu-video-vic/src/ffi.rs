@@ -26,16 +26,23 @@ pub unsafe extern "C" fn ryu_vic_blend_surface(
     if dst_width == 0 || dst_height == 0 || src_width == 0 || src_height == 0 {
         return VIC_STATUS_OK;
     }
-    if dst_len < dst_width * dst_height || src_len < src_width * src_height {
-        return VIC_STATUS_INVALID_ARGUMENT;
+    match (
+        dst_width.checked_mul(dst_height),
+        src_width.checked_mul(src_height),
+    ) {
+        (Some(d), Some(s)) if dst_len >= d && src_len >= s => {}
+        _ => return VIC_STATUS_INVALID_ARGUMENT,
     }
 
+    // SAFETY: the caller guarantees `dst_len` writable and `src_len` readable pixels behind
+    // the (non-null) pointers, and that the two surfaces do not overlap; `rect` and `matrix`
+    // are non-null and point at valid values.
     let dst_slice = slice::from_raw_parts_mut(dst, dst_len);
     let src_slice = slice::from_raw_parts(src, src_len);
     let target_rect = &*rect;
     let color_matrix = &*matrix;
 
-    blend_surface(
+    match blend_surface(
         dst_slice,
         dst_width,
         dst_height,
@@ -44,9 +51,10 @@ pub unsafe extern "C" fn ryu_vic_blend_surface(
         src_height,
         target_rect,
         color_matrix,
-    );
-
-    VIC_STATUS_OK
+    ) {
+        Ok(()) => VIC_STATUS_OK,
+        Err(status) => status,
+    }
 }
 
 #[no_mangle]

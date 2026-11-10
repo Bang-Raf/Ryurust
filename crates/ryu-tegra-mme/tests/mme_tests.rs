@@ -244,3 +244,88 @@ fn test_step2_mme_indirect_draw_dispatch() {
         assert_eq!(out_calls[i].meth_addr, 0x585);
     }
 }
+
+// --- RUNAWAY MACRO GUARD ---
+
+/// `Branch` (op 7) on R0 == 0 (always taken) back into the code: never exits.
+fn infinite_loop_macro(imm: i32) -> [i32; 3] {
+    let branch = 7 | ((imm << 14) & !0x3fff);
+    // Second instruction sends R0 each iteration so progress is observable.
+    let send = 1 | (4 << 4);
+    [branch, send, 0x80]
+}
+
+#[test]
+fn test_infinite_loop_macro_terminates_with_step_limit() {
+    for imm in [0, -1, -5] {
+        let code = infinite_loop_macro(imm);
+        let mut out = [MmeMethodCall {
+            meth_addr: 0,
+            value: 0,
+        }; 8];
+        let mut interp = MmeInterpreter::new();
+        let n = interp.execute_with_step_limit(&code, 0, &[], &[], &mut out, 10_000);
+        assert!(interp.last_run_hit_step_limit(), "imm {imm}");
+        assert!(n <= out.len());
+    }
+}
+
+#[test]
+fn test_infinite_loop_macro_terminates_with_default_budget() {
+    // The old guard compared the PC with code.len() + 1000, which a backward branch never
+    // reaches; this must return instead of hanging.
+    let code = infinite_loop_macro(0);
+    let mut out = [MmeMethodCall {
+        meth_addr: 0,
+        value: 0,
+    }; 4];
+    let mut interp = MmeInterpreter::new();
+    let n = interp.execute(&code, 0, &[], &[], &mut out);
+    assert!(interp.last_run_hit_step_limit());
+    assert!(n <= out.len());
+
+    // Same through the C ABI.
+    let mut count = usize::MAX;
+    let status = unsafe {
+        ryu_mme_execute(
+            code.as_ptr(),
+            code.len(),
+            0,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            out.as_mut_ptr(),
+            out.len(),
+            &mut count,
+        )
+    };
+    assert_eq!(status, RYU_MME_OK);
+    assert!(count <= out.len());
+}
+
+#[test]
+fn test_branch_past_end_of_code_terminates() {
+    // Jumping beyond the code feeds zero opcodes (never exit); it is cut off early by the
+    // end-of-code check, well before the step budget.
+    let code = [7 | (1000 << 14), 0];
+    let mut out = [MmeMethodCall {
+        meth_addr: 0,
+        value: 0,
+    }; 1];
+    let mut interp = MmeInterpreter::new();
+    interp.execute_with_step_limit(&code, 0, &[], &[], &mut out, 1_000_000);
+    assert!(!interp.last_run_hit_step_limit());
+}
+
+#[test]
+fn test_normal_macro_does_not_hit_step_limit() {
+    let code = [0x80, 0]; // exit + delay slot
+    let mut out = [MmeMethodCall {
+        meth_addr: 0,
+        value: 0,
+    }; 1];
+    let mut interp = MmeInterpreter::new();
+    interp.execute(&code, 0, &[], &[], &mut out);
+    assert!(!interp.last_run_hit_step_limit());
+}

@@ -1,6 +1,6 @@
 //! BC7 (BPTC) texture decompression.
 
-use crate::block::{Block, RgbaColor32};
+use crate::block::{store_tile, Block, RgbaColor32};
 use crate::tables::{BC7_MODE_INFOS, FIXUP_INDICES, PARTITION_TABLE, WEIGHTS};
 
 #[inline(always)]
@@ -211,8 +211,6 @@ pub fn decode_bc7_surface(
     }
 
     let mut tile = [0u32; 16];
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, width * height) };
 
     let mut src_offset = 0;
     for by in 0..blocks_y {
@@ -227,13 +225,7 @@ pub fn decode_bc7_surface(
 
             decode_bc7_block(block, &mut tile);
 
-            for ty in 0..bh {
-                let dst_row = (y_base + ty) * width + x_base;
-                let tile_row = ty * 4;
-                for tx in 0..bw {
-                    dst32[dst_row + tx] = tile[tile_row + tx];
-                }
-            }
+            store_tile(dst, &tile, width, x_base, y_base, bw, bh);
         }
     }
     Ok(())

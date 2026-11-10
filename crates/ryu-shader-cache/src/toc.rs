@@ -66,13 +66,30 @@ pub fn validate_header(data: &[u8], expected_magic: u32) -> Result<TocHeader, To
     })
 }
 
+/// Parses the entries of a host shader cache TOC file (shared `TOCS` or host `TOCH`)
+/// into `out_entries`, returning how many were written.
+///
+/// The 32-byte header is validated first: its magic must be [`TOCS_MAGIC`] or
+/// [`TOCH_MAGIC`] and its format version [`FILE_FORMAT_VERSION_PACKED`]. Use
+/// [`parse_toc_entries_with_magic`] to require one specific magic.
 pub fn parse_toc_entries(
     data: &[u8],
     out_entries: &mut [OffsetAndSize],
 ) -> Result<usize, TocError> {
-    if data.len() < 32 {
-        return Err(TocError::BufferTooSmall);
-    }
+    let expected_magic = match data.get(0..4) {
+        Some(m) if u32::from_le_bytes(m.try_into().unwrap()) == TOCH_MAGIC => TOCH_MAGIC,
+        _ => TOCS_MAGIC,
+    };
+    parse_toc_entries_with_magic(data, expected_magic, out_entries)
+}
+
+/// Like [`parse_toc_entries`], but requires the header magic to be `expected_magic`.
+pub fn parse_toc_entries_with_magic(
+    data: &[u8],
+    expected_magic: u32,
+    out_entries: &mut [OffsetAndSize],
+) -> Result<usize, TocError> {
+    validate_header(data, expected_magic)?;
 
     let entries_bytes = &data[32..];
     let count = entries_bytes.len() / 16;

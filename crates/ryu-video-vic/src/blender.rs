@@ -1,3 +1,4 @@
+use crate::ffi::VIC_STATUS_INVALID_ARGUMENT;
 use crate::types::{VicColorMatrix, VicPixel, VicRectangle};
 
 #[inline(always)]
@@ -49,6 +50,11 @@ fn transform_pixel(src_px: VicPixel, matrix: &VicColorMatrix) -> VicPixel {
 
 /// Blends a source surface into destination surface using the specified color matrix and target rectangle.
 /// Matches `Blender.BlendOne(dst, src, ref slot, targetRect)`.
+///
+/// `dst` must hold at least `dst_width * dst_height` pixels and `src` at least
+/// `src_width * src_height`; otherwise nothing is written and
+/// `Err(VIC_STATUS_INVALID_ARGUMENT)` is returned. The check is done up front, so the serial
+/// and the `parallel` path can never index outside the buffers.
 pub fn blend_surface(
     dst: &mut [VicPixel],
     dst_width: usize,
@@ -58,56 +64,74 @@ pub fn blend_surface(
     src_height: usize,
     rect: &VicRectangle,
     matrix: &VicColorMatrix,
-) {
+) -> Result<(), i32> {
     if dst_width == 0 || dst_height == 0 || src_width == 0 || src_height == 0 {
-        return;
+        return Ok(());
+    }
+
+    let dst_needed = dst_width.checked_mul(dst_height);
+    let src_needed = src_width.checked_mul(src_height);
+    match (dst_needed, src_needed) {
+        (Some(d), Some(s)) if dst.len() >= d && src.len() >= s => {}
+        _ => return Err(VIC_STATUS_INVALID_ARGUMENT),
     }
 
     let x1 = rect.x.max(0) as usize;
     let y1 = rect.y.max(0) as usize;
-    let x2 = (rect.x + rect.width)
-        .min(src_width as i32)
-        .min(dst_width as i32)
+    // Widths/heights larger than i32::MAX clamp to i32::MAX here; that only matters for
+    // the min() below, which is bounded by the rectangle anyway.
+    let src_w = i32::try_from(src_width).unwrap_or(i32::MAX);
+    let src_h = i32::try_from(src_height).unwrap_or(i32::MAX);
+    let dst_w = i32::try_from(dst_width).unwrap_or(i32::MAX);
+    let dst_h = i32::try_from(dst_height).unwrap_or(i32::MAX);
+    let x2 = rect
+        .x
+        .saturating_add(rect.width)
+        .min(src_w)
+        .min(dst_w)
         .max(0) as usize;
-    let y2 = (rect.y + rect.height)
-        .min(src_height as i32)
-        .min(dst_height as i32)
+    let y2 = rect
+        .y
+        .saturating_add(rect.height)
+        .min(src_h)
+        .min(dst_h)
         .max(0) as usize;
 
     if x1 >= x2 || y1 >= y2 {
-        return;
+        return Ok(());
     }
+
+    // Validated above: y2 <= min(src_height, dst_height) and x2 <= min(src_width, dst_width),
+    // so every row slice below is in bounds.
+    let dst_rows = &mut dst[y1 * dst_width..y2 * dst_width];
+    let src_rows = &src[y1 * src_width..y2 * src_width];
 
     #[cfg(feature = "parallel")]
     {
         if (y2 - y1) >= 64 {
             use rayon::prelude::*;
 
-            let dst_ptr = dst.as_mut_ptr() as usize;
-            let src_ptr = src.as_ptr() as usize;
-
-            (y1..y2).into_par_iter().for_each(|y| unsafe {
-                let d_row = (dst_ptr as *mut VicPixel).add(y * dst_width);
-                let s_row = (src_ptr as *const VicPixel).add(y * src_width);
-
-                for x in x1..x2 {
-                    let sp = *s_row.add(x);
-                    *d_row.add(x) = transform_pixel(sp, matrix);
-                }
-            });
-            return;
+            dst_rows
+                .par_chunks_mut(dst_width)
+                .zip(src_rows.par_chunks(src_width))
+                .for_each(|(d_row, s_row)| blend_row(&mut d_row[x1..x2], &s_row[x1..x2], matrix));
+            return Ok(());
         }
     }
 
-    for y in y1..y2 {
-        let s_off = y * src_width;
-        let d_off = y * dst_width;
+    for (d_row, s_row) in dst_rows
+        .chunks_mut(dst_width)
+        .zip(src_rows.chunks(src_width))
+    {
+        blend_row(&mut d_row[x1..x2], &s_row[x1..x2], matrix);
+    }
 
-        let s_row = &src[s_off..s_off + src_width];
-        let d_row = &mut dst[d_off..d_off + dst_width];
+    Ok(())
+}
 
-        for x in x1..x2 {
-            d_row[x] = transform_pixel(s_row[x], matrix);
-        }
+#[inline(always)]
+fn blend_row(dst: &mut [VicPixel], src: &[VicPixel], matrix: &VicColorMatrix) {
+    for (d, &s) in dst.iter_mut().zip(src) {
+        *d = transform_pixel(s, matrix);
     }
 }

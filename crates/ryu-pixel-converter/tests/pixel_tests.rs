@@ -94,11 +94,9 @@ fn test_step2_convert_r4g4_to_r4g4b4a4() {
     let mut dst = vec![0u8; src.len() * 2];
 
     convert_r4g4_to_r4g4b4a4(&src, &mut dst, 8).unwrap();
-    let dst16: &[u16] =
-        unsafe { std::slice::from_raw_parts(dst.as_ptr() as *const u16, src.len()) };
-
-    for i in 0..src.len() {
-        assert_eq!(dst16[i], src[i] as u16, "R4G4 expansion mismatch at {}", i);
+    for (i, chunk) in dst.chunks_exact(2).enumerate() {
+        let got = u16::from_le_bytes([chunk[0], chunk[1]]);
+        assert_eq!(got, src[i] as u16, "R4G4 expansion mismatch at {}", i);
     }
 }
 
@@ -156,14 +154,13 @@ fn test_step2_convert_r4g4b4a4_all_bit_identical() {
 #[test]
 fn test_step2_convert_bgra8_to_rgba8() {
     let src32 = [0xFF0000AAu32, 0x11223344u32, 0xAABBCCDDu32, 0x00FF00FFu32];
-    let src_bytes: &[u8] = unsafe { std::slice::from_raw_parts(src32.as_ptr() as *const u8, 16) };
+    let src_bytes: Vec<u8> = src32.iter().flat_map(|p| p.to_le_bytes()).collect();
     let mut dst_bytes = vec![0u8; 16];
-    convert_bgra8_to_rgba8(src_bytes, &mut dst_bytes).unwrap();
-    let dst32: &[u32] = unsafe { std::slice::from_raw_parts(dst_bytes.as_ptr() as *const u32, 4) };
+    convert_bgra8_to_rgba8(&src_bytes, &mut dst_bytes).unwrap();
 
-    for i in 0..4 {
+    for (i, chunk) in dst_bytes.chunks_exact(4).enumerate() {
         let expected = convert_bgra8_pixel(src32[i]);
-        assert_eq!(dst32[i], expected);
+        assert_eq!(u32::from_le_bytes(chunk.try_into().unwrap()), expected);
     }
 }
 
@@ -180,5 +177,144 @@ fn test_step2_odd_widths_and_remainders() {
         assert!(convert_r5g5b5_to_r8g8b8a8(&src_data, &mut dst_data, width, true).is_ok());
         assert!(convert_a1b5g5r5_to_r8g8b8a8(&src_data, &mut dst_data, width).is_ok());
         assert!(convert_r4g4b4a4_to_r8g8b8a8(&src_data, &mut dst_data, width).is_ok());
+    }
+}
+
+// =========================================================================
+// Alignment safety: every routine must accept arbitrarily aligned byte slices.
+// =========================================================================
+
+type Conv16Fn = fn(&[u8], &mut [u8], usize) -> Result<(), &'static str>;
+type Conv16Case = (&'static str, Conv16Fn, fn(u16) -> u32);
+
+fn conv16_cases() -> Vec<Conv16Case> {
+    vec![
+        ("r5g6b5", convert_r5g6b5_to_r8g8b8a8, ref_convert_r5g6b5),
+        (
+            "a1b5g5r5",
+            convert_a1b5g5r5_to_r8g8b8a8,
+            ref_convert_a1b5g5r5,
+        ),
+        (
+            "r4g4b4a4",
+            convert_r4g4b4a4_to_r8g8b8a8,
+            ref_convert_r4g4b4a4,
+        ),
+        (
+            "r5g5b5",
+            |s, d, w| convert_r5g5b5_to_r8g8b8a8(s, d, w, false),
+            |p| ref_convert_r5g5b5(p, false),
+        ),
+    ]
+}
+
+#[test]
+fn test_misaligned_16bpp_to_rgba8() {
+    for (name, conv, reference) in conv16_cases() {
+        // Width 16 takes the contiguous path; odd widths take the strided path.
+        for &width in &[16usize, 1, 3, 7] {
+            let height = 5;
+            let stride = align_up(width * 2, 4);
+            let out_stride = width * 4;
+            let src_len = stride * height;
+            let src_data: Vec<u8> = (0..src_len).map(|i| (i * 31 + 7) as u8).collect();
+
+            // Offset both buffers by one byte inside larger Vecs so neither is
+            // 2- or 4-byte aligned.
+            let mut src_backing = vec![0u8; src_len + 1];
+            src_backing[1..].copy_from_slice(&src_data);
+            let mut dst_backing = vec![0u8; src_len * 2 + 1];
+            let src = &src_backing[1..];
+            let dst = &mut dst_backing[1..];
+            assert_ne!(src.as_ptr() as usize % 2, 0);
+
+            conv(src, dst, width).unwrap();
+
+            for y in 0..height {
+                for x in 0..width {
+                    let si = y * stride + x * 2;
+                    let di = y * out_stride + x * 4;
+                    let packed = u16::from_le_bytes([src_data[si], src_data[si + 1]]);
+                    let got = u32::from_le_bytes(dst[di..di + 4].try_into().unwrap());
+                    assert_eq!(got, reference(packed), "{name} w={width} x={x} y={y}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_misaligned_r4g4_to_r4g4b4a4() {
+    for &width in &[16usize, 3] {
+        let height = 3;
+        let stride = align_up(width, 4);
+        let out_stride = align_up(width * 2, 4);
+        let src_data: Vec<u8> = (0..stride * height).map(|i| (i * 13) as u8).collect();
+        let mut src_backing = vec![0u8; src_data.len() + 1];
+        src_backing[1..].copy_from_slice(&src_data);
+        let mut dst_backing = vec![0u8; src_data.len() * 2 + 1];
+        let dst = &mut dst_backing[1..];
+
+        convert_r4g4_to_r4g4b4a4(&src_backing[1..], dst, width).unwrap();
+
+        for y in 0..height {
+            for x in 0..width {
+                let di = y * out_stride + x * 2;
+                let got = u16::from_le_bytes([dst[di], dst[di + 1]]);
+                assert_eq!(
+                    got,
+                    src_data[y * stride + x] as u16,
+                    "w={width} x={x} y={y}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_misaligned_bgra8_to_rgba8() {
+    let pixels = 37;
+    let src_data: Vec<u8> = (0..pixels * 4).map(|i| (i * 7 + 3) as u8).collect();
+    let mut src_backing = vec![0u8; src_data.len() + 1];
+    src_backing[1..].copy_from_slice(&src_data);
+    let mut dst_backing = vec![0u8; src_data.len() + 3];
+    let dst = &mut dst_backing[3..];
+
+    convert_bgra8_to_rgba8(&src_backing[1..], dst).unwrap();
+
+    for (s, d) in src_data.chunks_exact(4).zip(dst.chunks_exact(4)) {
+        assert_eq!(d, [s[2], s[1], s[0], s[3]]);
+    }
+}
+
+#[test]
+fn test_bgra8_length_must_be_pixel_multiple() {
+    let src = [1u8, 2, 3, 4, 5, 6];
+    let mut dst = [0xEEu8; 6];
+    assert_eq!(
+        convert_bgra8_to_rgba8(&src, &mut dst),
+        Err(ERR_LENGTH_NOT_PIXEL_MULTIPLE)
+    );
+    assert_eq!(dst, [0xEE; 6], "dst must be untouched on error");
+
+    let mut short = [0u8; 4];
+    assert_eq!(
+        convert_bgra8_to_rgba8(&src, &mut short),
+        Err(ERR_BUFFER_LENGTH_MISMATCH)
+    );
+
+    unsafe {
+        assert_eq!(
+            ryu_pixel_convert_bgra8_to_rgba8(src.as_ptr(), 6, dst.as_mut_ptr(), 6),
+            RYU_PIXEL_ERR_INVALID_PARAM
+        );
+        assert_eq!(
+            ryu_pixel_convert_bgra8_to_rgba8(src.as_ptr(), 4, dst.as_mut_ptr(), 4),
+            RYU_PIXEL_SUCCESS
+        );
+        assert_eq!(
+            ryu_pixel_convert_bgra8_to_rgba8(src.as_ptr(), 6, short.as_mut_ptr(), 4),
+            RYU_PIXEL_ERR_BUFFER_TOO_SMALL
+        );
     }
 }

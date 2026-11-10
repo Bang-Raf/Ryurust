@@ -51,7 +51,7 @@ fn bench(c: &mut Criterion) {
     let voices: Vec<Vec<f32>> = (0..VOICES).map(|v| pcm(v as f32 * 0.37)).collect();
     let voice_slices: Vec<&[f32]> = voices.iter().map(|v| v.as_slice()).collect();
     let volumes: Vec<f32> = (0..VOICES).map(|v| 0.1 + (v % 8) as f32 * 0.1).collect();
-    assert!(volumes.iter().all(|&v| v != 0.0)); // volume 0 is an early-out in mix_buffer
+    assert!(volumes.iter().all(|&v| v != 0.0)); // every voice contributes
 
     g.throughput(Throughput::Elements((VOICES * QUANTUM) as u64));
     g.bench_function(

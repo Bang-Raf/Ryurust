@@ -319,3 +319,137 @@ fn test_step2_end_to_end_frame_decode() {
         "V plane must be 100% bit-identical across successive runs"
     );
 }
+
+// =========================================================================
+// IDCT 32x32 ZERO-ROW CHECK AND 1-D IDCT32 ACCURACY
+// =========================================================================
+
+#[test]
+fn test_row_is_zero_uses_full_i32() {
+    assert!(row_is_zero(&[0i32; 32]));
+    let mut row = [0i32; 32];
+    row[5] = 65536; // `as i16` would make this 0
+    assert!(!row_is_zero(&row));
+    row[5] = -131072;
+    assert!(!row_is_zero(&row));
+    row[5] = 1 << 31;
+    assert!(!row_is_zero(&row));
+    row[5] = 0;
+    row[31] = 1;
+    assert!(!row_is_zero(&row));
+}
+
+/// Reference 32x32 IDCT-add that never skips a row.
+fn reference_idct32x32_add(input: &[i32], dest: &mut [u8], stride: usize) {
+    let mut inter = [0i32; 1024];
+    for i in 0..32 {
+        idct32(
+            &input[i * 32..(i + 1) * 32],
+            &mut inter[i * 32..(i + 1) * 32],
+        );
+    }
+    let mut col_in = [0i32; 32];
+    let mut col_out = [0i32; 32];
+    for i in 0..32 {
+        for j in 0..32 {
+            col_in[j] = inter[j * 32 + i];
+        }
+        idct32(&col_in, &mut col_out);
+        for j in 0..32 {
+            let p = dest[j * stride + i] as i32 + ((col_out[j] + 32) >> 6);
+            dest[j * stride + i] = p.clamp(0, 255) as u8;
+        }
+    }
+}
+
+#[test]
+fn test_idct32x32_rows_with_multiple_of_65536_coefficients() {
+    // Rows whose only non-zero coefficients are multiples of 65536 must not be skipped by the
+    // zero-row shortcut; the result must equal the no-shortcut reference.
+    let mut coeffs = [0i32; 1024];
+    coeffs[0] = 300;
+    coeffs[3 * 32 + 7] = 65536;
+    coeffs[9 * 32] = 65536 + 40; // low 16 bits non-zero too
+    coeffs[17 * 32 + 1] = -65536 * 3;
+    coeffs[31 * 32 + 31] = 25;
+
+    let mut got = [100u8; 1024];
+    let mut expected = [100u8; 1024];
+    idct32x32_1024_add(&coeffs, &mut got, 32);
+    reference_idct32x32_add(&coeffs, &mut expected, 32);
+    assert_eq!(got.to_vec(), expected.to_vec());
+}
+
+#[test]
+fn test_idct32_matches_float_reference() {
+    // VP9 1-D IDCT: out[n] = X0 / sqrt(2) + sum_{k>=1} X[k] * cos(pi * (2n + 1) * k / 64).
+    let mut seed = 0x1234_5678u32;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed
+    };
+    for trial in 0..200 {
+        let mut input = [0i32; 32];
+        if trial < 32 {
+            input[trial] = 1000; // single-frequency basis vectors
+        } else {
+            for c in input.iter_mut() {
+                *c = (next() % 801) as i32 - 400;
+            }
+        }
+        let mut out = [0i32; 32];
+        idct32(&input, &mut out);
+        for (n, &o) in out.iter().enumerate() {
+            let mut r = input[0] as f64 / std::f64::consts::SQRT_2;
+            for (k, &x) in input.iter().enumerate().skip(1) {
+                r += x as f64 * (std::f64::consts::PI * (2 * n + 1) as f64 * k as f64 / 64.0).cos();
+            }
+            assert!(
+                (o as f64 - r).abs() <= 8.0,
+                "trial {trial} n {n}: got {o}, reference {r:.2}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_decode_frame_reads_separate_u_and_v_dc() {
+    let config = Vp9FrameConfig {
+        width: 64,
+        height: 64,
+        is_key_frame: 1,
+        intra_only: 1,
+        filter_level: 0,
+        sharpness: 0,
+        base_qindex: 80,
+        transform_mode: 1,
+        lossless: 0,
+    };
+    let mut seed = 0xdead_beefu32;
+    let bitstream: Vec<u8> = (0..512)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as u8
+        })
+        .collect();
+    let mut y = vec![0u8; 64 * 64];
+    let mut u = vec![0u8; 32 * 32];
+    let mut v = vec![0u8; 32 * 32];
+    Vp9DecoderPipeline::decode_frame(&bitstream, &config, &mut y, &mut u, &mut v, 64, 32).unwrap();
+    // Previously U and V were reconstructed from the same (luma) DC and were always equal.
+    assert!(
+        u.iter().any(|&p| p != 128),
+        "some chroma block must be coded"
+    );
+    assert_ne!(u, v, "U and V must come from separate DC values");
+    // Each coded 8x8 chroma block is flat (DC only), so U and V differ block-wise.
+    let differing_blocks = (0..4)
+        .flat_map(|by| (0..4).map(move |bx| (bx, by)))
+        .filter(|&(bx, by)| u[by * 8 * 32 + bx * 8] != v[by * 8 * 32 + bx * 8])
+        .count();
+    assert!(differing_blocks > 0);
+}

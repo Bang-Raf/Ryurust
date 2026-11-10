@@ -137,7 +137,7 @@ fn test_step2_blend_surface_passthrough_bit_identical() {
         ..Default::default()
     };
 
-    blend_surface(&mut dst, W, H, &src, W, H, &rect, &matrix);
+    blend_surface(&mut dst, W, H, &src, W, H, &rect, &matrix).unwrap();
 
     for y in 0..H {
         for x in 0..W {
@@ -197,7 +197,7 @@ fn test_step2_blend_surface_color_matrix_bit_identical() {
         height: 100,
     };
 
-    blend_surface(&mut dst, W, H, &src, W, H, &rect, &matrix);
+    blend_surface(&mut dst, W, H, &src, W, H, &rect, &matrix).unwrap();
 
     // Reference evaluation matching Blender.MatrixMultiply
     for y in 10..110 {
@@ -290,5 +290,149 @@ fn test_step2_deinterlace_motion_adaptive_differential() {
     // Pixels 32..64 had motion: prev != next -> should use Bob (other field = 100)
     for i in 32..64 {
         assert_eq!(data[field_size + i], 100, "Bob expected at index {}", i);
+    }
+}
+
+// =========================================================================
+// SHORT-BUFFER VALIDATION (serial path: < 64 rows, parallel path: >= 64 rows)
+// =========================================================================
+
+fn short_buffer_case(w: usize, h: usize) {
+    let rect = VicRectangle {
+        x: 0,
+        y: 0,
+        width: w as i32,
+        height: h as i32,
+    };
+    let matrix = VicColorMatrix::default();
+    let marker = VicPixel {
+        r: 1,
+        g: 2,
+        b: 3,
+        a: 4,
+    };
+    let src_ok = vec![VicPixel::default(); w * h];
+
+    // dst one pixel short
+    let mut dst_short = vec![marker; w * h - 1];
+    assert_eq!(
+        blend_surface(&mut dst_short, w, h, &src_ok, w, h, &rect, &matrix),
+        Err(VIC_STATUS_INVALID_ARGUMENT)
+    );
+    assert!(
+        dst_short.iter().all(|&p| p == marker),
+        "nothing may be written"
+    );
+
+    // dst only half the claimed height
+    let mut dst_half = vec![marker; w * h / 2];
+    assert_eq!(
+        blend_surface(&mut dst_half, w, h, &src_ok, w, h, &rect, &matrix),
+        Err(VIC_STATUS_INVALID_ARGUMENT)
+    );
+    assert!(dst_half.iter().all(|&p| p == marker));
+
+    // src one pixel short
+    let mut dst_ok = vec![marker; w * h];
+    let src_short = vec![VicPixel::default(); w * h - 1];
+    assert_eq!(
+        blend_surface(&mut dst_ok, w, h, &src_short, w, h, &rect, &matrix),
+        Err(VIC_STATUS_INVALID_ARGUMENT)
+    );
+    assert!(dst_ok.iter().all(|&p| p == marker));
+
+    // Overflowing width * height
+    assert_eq!(
+        blend_surface(&mut dst_ok, usize::MAX, 2, &src_ok, w, h, &rect, &matrix),
+        Err(VIC_STATUS_INVALID_ARGUMENT)
+    );
+
+    // Same through the C ABI.
+    unsafe {
+        assert_eq!(
+            ryu_vic_blend_surface(
+                dst_short.as_mut_ptr(),
+                dst_short.len(),
+                w,
+                h,
+                src_ok.as_ptr(),
+                src_ok.len(),
+                w,
+                h,
+                &rect,
+                &matrix,
+            ),
+            VIC_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            ryu_vic_blend_surface(
+                dst_ok.as_mut_ptr(),
+                dst_ok.len(),
+                usize::MAX,
+                2,
+                src_ok.as_ptr(),
+                src_ok.len(),
+                w,
+                h,
+                &rect,
+                &matrix,
+            ),
+            VIC_STATUS_INVALID_ARGUMENT
+        );
+    }
+
+    // Correctly sized buffers succeed and write the whole rect.
+    assert_eq!(
+        blend_surface(&mut dst_ok, w, h, &src_ok, w, h, &rect, &matrix),
+        Ok(())
+    );
+    assert!(dst_ok.iter().all(|&p| p == VicPixel::default()));
+}
+
+#[test]
+fn test_blend_surface_short_buffers_serial_path() {
+    short_buffer_case(32, 16);
+}
+
+#[test]
+fn test_blend_surface_short_buffers_parallel_path() {
+    // >= 64 rows takes the rayon path when the `parallel` feature is on (default).
+    short_buffer_case(128, 256);
+}
+
+#[test]
+fn test_blend_surface_rect_overflow_is_clamped() {
+    const W: usize = 16;
+    const H: usize = 96;
+    let mut dst = vec![VicPixel::default(); W * H];
+    let src = vec![
+        VicPixel {
+            r: 5,
+            g: 6,
+            b: 7,
+            a: 8
+        };
+        W * H
+    ];
+    let rect = VicRectangle {
+        x: 1,
+        y: 1,
+        width: i32::MAX,
+        height: i32::MAX,
+    };
+    let matrix = VicColorMatrix::default();
+    assert_eq!(
+        blend_surface(&mut dst, W, H, &src, W, H, &rect, &matrix),
+        Ok(())
+    );
+    for y in 0..H {
+        for x in 0..W {
+            let expected = if x >= 1 && y >= 1 {
+                src[0]
+            } else {
+                VicPixel::default()
+            };
+            assert_eq!(dst[y * W + x], expected, "({x},{y})");
+        }
     }
 }

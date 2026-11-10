@@ -85,6 +85,64 @@ pub fn convert_bgra8_pixel(c: u32) -> u32 {
 // Surface Transcoding Routines
 // -------------------------------------------------------------------------
 
+// All routines below operate on byte slices with no alignment requirement: pixels are
+// read and written with `from_le_bytes` / `to_le_bytes` over `chunks_exact`, which the
+// compiler lowers to unaligned loads/stores (and vectorises on the contiguous path).
+
+#[inline(always)]
+fn read_u16(src: &[u8], index: usize) -> u16 {
+    u16::from_le_bytes([src[index * 2], src[index * 2 + 1]])
+}
+
+#[inline(always)]
+fn write_u32(dst: &mut [u8], index: usize, value: u32) {
+    dst[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+/// Shared body of the 16 bpp -> 32 bpp transcoders.
+#[inline(always)]
+fn convert_16_to_32(
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    convert: impl Fn(u16) -> u32,
+) -> Result<(), &'static str> {
+    if src.is_empty() {
+        return Ok(());
+    }
+    if dst.len() < src.len() * 2 {
+        return Err("Destination buffer too small");
+    }
+    let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 2, 4);
+
+    if remainder == 0 && out_remainder == 0 {
+        // Fixed-size array chunks carry no per-pixel bounds checks, so this
+        // vectorises like the old `&[u16]` cast did, without needing alignment.
+        let (src_px, _) = src.as_chunks::<2>();
+        let (dst_px, _) = dst.as_chunks_mut::<4>();
+        for (s, d) in src_px.iter().zip(dst_px.iter_mut()) {
+            *d = convert(u16::from_le_bytes(*s)).to_le_bytes();
+        }
+    } else {
+        let src_pixels = src.len() / 2;
+        let dst_pixels = dst.len() / 4;
+        let mut offset = 0;
+        let mut out_offset = 0;
+        for _ in 0..height {
+            for _ in 0..width {
+                if offset < src_pixels && out_offset < dst_pixels {
+                    write_u32(dst, out_offset, convert(read_u16(src, offset)));
+                    out_offset += 1;
+                    offset += 1;
+                }
+            }
+            offset += remainder;
+            out_offset += out_remainder;
+        }
+    }
+    Ok(())
+}
+
 pub fn convert_r4g4_to_r4g4b4a4(
     src: &[u8],
     dst: &mut [u8],
@@ -99,21 +157,21 @@ pub fn convert_r4g4_to_r4g4b4a4(
 
     let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 1, 2);
 
-    let dst16: &mut [u16] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u16, dst.len() / 2) };
-
     if remainder == 0 && out_remainder == 0 {
         // Fast contiguous path
-        for i in 0..src.len() {
-            dst16[i] = src[i] as u16;
+        let (dst_px, _) = dst.as_chunks_mut::<2>();
+        for (&s, d) in src.iter().zip(dst_px.iter_mut()) {
+            *d = (s as u16).to_le_bytes();
         }
     } else {
+        let dst_pixels = dst.len() / 2;
         let mut offset = 0;
         let mut out_offset = 0;
         for _ in 0..height {
             for _ in 0..width {
-                if offset < src.len() && out_offset < dst16.len() {
-                    dst16[out_offset] = src[offset] as u16;
+                if offset < src.len() && out_offset < dst_pixels {
+                    dst[out_offset * 2..out_offset * 2 + 2]
+                        .copy_from_slice(&(src[offset] as u16).to_le_bytes());
                     out_offset += 1;
                     offset += 1;
                 }
@@ -130,40 +188,7 @@ pub fn convert_r5g6b5_to_r8g8b8a8(
     dst: &mut [u8],
     width: usize,
 ) -> Result<(), &'static str> {
-    if src.is_empty() {
-        return Ok(());
-    }
-    if dst.len() < src.len() * 2 {
-        return Err("Destination buffer too small");
-    }
-    let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 2, 4);
-
-    let src16: &[u16] =
-        unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u16, src.len() / 2) };
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, dst.len() / 4) };
-
-    if remainder == 0 && out_remainder == 0 {
-        let count = src16.len().min(dst32.len());
-        for i in 0..count {
-            dst32[i] = convert_r5g6b5_pixel(src16[i]);
-        }
-    } else {
-        let mut offset = 0;
-        let mut out_offset = 0;
-        for _ in 0..height {
-            for _ in 0..width {
-                if offset < src16.len() && out_offset < dst32.len() {
-                    dst32[out_offset] = convert_r5g6b5_pixel(src16[offset]);
-                    out_offset += 1;
-                    offset += 1;
-                }
-            }
-            offset += remainder;
-            out_offset += out_remainder;
-        }
-    }
-    Ok(())
+    convert_16_to_32(src, dst, width, convert_r5g6b5_pixel)
 }
 
 pub fn convert_r5g5b5_to_r8g8b8a8(
@@ -172,40 +197,7 @@ pub fn convert_r5g5b5_to_r8g8b8a8(
     width: usize,
     force_alpha: bool,
 ) -> Result<(), &'static str> {
-    if src.is_empty() {
-        return Ok(());
-    }
-    if dst.len() < src.len() * 2 {
-        return Err("Destination buffer too small");
-    }
-    let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 2, 4);
-
-    let src16: &[u16] =
-        unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u16, src.len() / 2) };
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, dst.len() / 4) };
-
-    if remainder == 0 && out_remainder == 0 {
-        let count = src16.len().min(dst32.len());
-        for i in 0..count {
-            dst32[i] = convert_r5g5b5_pixel(src16[i], force_alpha);
-        }
-    } else {
-        let mut offset = 0;
-        let mut out_offset = 0;
-        for _ in 0..height {
-            for _ in 0..width {
-                if offset < src16.len() && out_offset < dst32.len() {
-                    dst32[out_offset] = convert_r5g5b5_pixel(src16[offset], force_alpha);
-                    out_offset += 1;
-                    offset += 1;
-                }
-            }
-            offset += remainder;
-            out_offset += out_remainder;
-        }
-    }
-    Ok(())
+    convert_16_to_32(src, dst, width, |p| convert_r5g5b5_pixel(p, force_alpha))
 }
 
 pub fn convert_a1b5g5r5_to_r8g8b8a8(
@@ -213,40 +205,7 @@ pub fn convert_a1b5g5r5_to_r8g8b8a8(
     dst: &mut [u8],
     width: usize,
 ) -> Result<(), &'static str> {
-    if src.is_empty() {
-        return Ok(());
-    }
-    if dst.len() < src.len() * 2 {
-        return Err("Destination buffer too small");
-    }
-    let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 2, 4);
-
-    let src16: &[u16] =
-        unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u16, src.len() / 2) };
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, dst.len() / 4) };
-
-    if remainder == 0 && out_remainder == 0 {
-        let count = src16.len().min(dst32.len());
-        for i in 0..count {
-            dst32[i] = convert_a1b5g5r5_pixel(src16[i]);
-        }
-    } else {
-        let mut offset = 0;
-        let mut out_offset = 0;
-        for _ in 0..height {
-            for _ in 0..width {
-                if offset < src16.len() && out_offset < dst32.len() {
-                    dst32[out_offset] = convert_a1b5g5r5_pixel(src16[offset]);
-                    out_offset += 1;
-                    offset += 1;
-                }
-            }
-            offset += remainder;
-            out_offset += out_remainder;
-        }
-    }
-    Ok(())
+    convert_16_to_32(src, dst, width, convert_a1b5g5r5_pixel)
 }
 
 pub fn convert_r4g4b4a4_to_r8g8b8a8(
@@ -254,52 +213,30 @@ pub fn convert_r4g4b4a4_to_r8g8b8a8(
     dst: &mut [u8],
     width: usize,
 ) -> Result<(), &'static str> {
-    if src.is_empty() {
-        return Ok(());
-    }
-    if dst.len() < src.len() * 2 {
-        return Err("Destination buffer too small");
-    }
-    let (remainder, out_remainder, height) = get_line_remainders(src.len(), width, 2, 4);
-
-    let src16: &[u16] =
-        unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u16, src.len() / 2) };
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, dst.len() / 4) };
-
-    if remainder == 0 && out_remainder == 0 {
-        let count = src16.len().min(dst32.len());
-        for i in 0..count {
-            dst32[i] = convert_r4g4b4a4_pixel(src16[i]);
-        }
-    } else {
-        let mut offset = 0;
-        let mut out_offset = 0;
-        for _ in 0..height {
-            for _ in 0..width {
-                if offset < src16.len() && out_offset < dst32.len() {
-                    dst32[out_offset] = convert_r4g4b4a4_pixel(src16[offset]);
-                    out_offset += 1;
-                    offset += 1;
-                }
-            }
-            offset += remainder;
-            out_offset += out_remainder;
-        }
-    }
-    Ok(())
+    convert_16_to_32(src, dst, width, convert_r4g4b4a4_pixel)
 }
 
+/// Error returned by [`convert_bgra8_to_rgba8`] when the buffers differ in length.
+pub const ERR_BUFFER_LENGTH_MISMATCH: &str = "Buffer length mismatch";
+/// Error returned by [`convert_bgra8_to_rgba8`] when the length is not a whole number
+/// of 4-byte pixels.
+pub const ERR_LENGTH_NOT_PIXEL_MULTIPLE: &str = "Buffer length is not a multiple of 4";
+
+/// Swaps the R and B channels of every BGRA8 pixel in `src` into `dst`.
+///
+/// `src` and `dst` must have the same length, and that length must be a multiple of 4
+/// (whole pixels); otherwise an error is returned and `dst` is left untouched.
 pub fn convert_bgra8_to_rgba8(src: &[u8], dst: &mut [u8]) -> Result<(), &'static str> {
     if src.len() != dst.len() {
-        return Err("Buffer length mismatch");
+        return Err(ERR_BUFFER_LENGTH_MISMATCH);
     }
-    let src32: &[u32] =
-        unsafe { std::slice::from_raw_parts(src.as_ptr() as *const u32, src.len() / 4) };
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, dst.len() / 4) };
-    for (s, d) in src32.iter().zip(dst32.iter_mut()) {
-        *d = convert_bgra8_pixel(*s);
+    if src.len() % 4 != 0 {
+        return Err(ERR_LENGTH_NOT_PIXEL_MULTIPLE);
+    }
+    let (src_px, _) = src.as_chunks::<4>();
+    let (dst_px, _) = dst.as_chunks_mut::<4>();
+    for (s, d) in src_px.iter().zip(dst_px.iter_mut()) {
+        *d = convert_bgra8_pixel(u32::from_le_bytes(*s)).to_le_bytes();
     }
     Ok(())
 }

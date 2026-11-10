@@ -431,11 +431,13 @@ fn hash52(mut val: u32) -> i32 {
     val = val.wrapping_add(val << 16);
     val ^= val >> 7;
     val ^= val >> 3;
-    val = val.wrapping_add(val << 6);
+    val ^= val << 6;
     val ^= val >> 17;
     val as i32
 }
 
+/// ASTC partition selection, ported from `AstcDecoder.SelectPartition` in
+/// Ryujinx.Graphics.Texture/Astc (which follows the ASTC specification).
 fn select_partition(
     seed: i32,
     mut x: i32,
@@ -454,63 +456,69 @@ fn select_partition(
         z <<= 1;
     }
 
-    let mut right_num = (seed as u32) >> 8;
-    right_num ^= (right_num << 1) ^ (right_num >> 1);
-    right_num ^= (right_num << 2) ^ (right_num >> 2);
-    right_num ^= (right_num << 4) ^ (right_num >> 4);
-    right_num ^= (right_num << 8) ^ (right_num >> 8);
-    right_num &= 0x3F;
+    let seed = seed + (partition_count as i32 - 1) * 1024;
 
-    let mut seed_hash = hash52((seed as u32) ^ 0xA5A5A5A5) as u32;
-    let seed_hash1 = (seed_hash >> 24) as usize;
-    let seed_hash2 = ((seed_hash >> 16) & 0xFF) as usize;
-    let seed_hash3 = ((seed_hash >> 8) & 0xFF) as usize;
+    let right_num = hash52(seed as u32);
+    let nibble = |shift: u32| ((right_num as u32 >> shift) & 0xF) as i32;
+    let mut seeds = [
+        nibble(0),
+        nibble(4),
+        nibble(8),
+        nibble(12),
+        nibble(16),
+        nibble(20),
+        nibble(24),
+        nibble(28),
+        nibble(18),
+        nibble(22),
+        nibble(26),
+        ((right_num as u32).rotate_left(2) & 0xF) as i32,
+    ];
+    for s in &mut seeds {
+        *s *= *s;
+    }
 
-    let mut seed01 = (seed_hash & 0x0F) as i32;
-    let mut seed02 = ((seed_hash >> 4) & 0x0F) as i32;
-    let mut seed03 = ((seed_hash >> 8) & 0x0F) as i32;
-    let mut seed04 = ((seed_hash >> 12) & 0x0F) as i32;
-    let mut seed05 = ((seed_hash >> 16) & 0x0F) as i32;
-    let mut seed06 = ((seed_hash >> 20) & 0x0F) as i32;
-    let mut seed07 = ((seed_hash >> 24) & 0x0F) as i32;
-    let mut seed08 = ((seed_hash >> 28) & 0x0F) as i32;
+    let (seed_hash1, seed_hash2) = if (seed & 1) != 0 {
+        (
+            if (seed & 2) != 0 { 4 } else { 5 },
+            if partition_count == 3 { 6 } else { 5 },
+        )
+    } else {
+        (
+            if partition_count == 3 { 6 } else { 5 },
+            if (seed & 2) != 0 { 4 } else { 5 },
+        )
+    };
+    let seed_hash3 = if (seed & 0x10) != 0 {
+        seed_hash1
+    } else {
+        seed_hash2
+    };
 
-    seed_hash = hash52(seed_hash) as u32;
-    let mut seed09 = (seed_hash & 0x0F) as i32;
-    let mut seed10 = ((seed_hash >> 4) & 0x0F) as i32;
-    let mut seed11 = ((seed_hash >> 8) & 0x0F) as i32;
-    let mut seed12 = ((seed_hash >> 12) & 0x0F) as i32;
+    let [s01, s02, s03, s04, s05, s06, s07, s08, s09, s10, s11, s12] = seeds;
+    let (s01, s03, s05, s07) = (
+        s01 >> seed_hash1,
+        s03 >> seed_hash1,
+        s05 >> seed_hash1,
+        s07 >> seed_hash1,
+    );
+    let (s02, s04, s06, s08) = (
+        s02 >> seed_hash2,
+        s04 >> seed_hash2,
+        s06 >> seed_hash2,
+        s08 >> seed_hash2,
+    );
+    let (s09, s10, s11, s12) = (
+        s09 >> seed_hash3,
+        s10 >> seed_hash3,
+        s11 >> seed_hash3,
+        s12 >> seed_hash3,
+    );
 
-    seed01 *= seed01;
-    seed02 *= seed02;
-    seed03 *= seed03;
-    seed04 *= seed04;
-    seed05 *= seed05;
-    seed06 *= seed06;
-    seed07 *= seed07;
-    seed08 *= seed08;
-    seed09 *= seed09;
-    seed10 *= seed10;
-    seed11 *= seed11;
-    seed12 *= seed12;
-
-    seed01 >>= seed_hash1;
-    seed02 >>= seed_hash2;
-    seed03 >>= seed_hash1;
-    seed04 >>= seed_hash2;
-    seed05 >>= seed_hash1;
-    seed06 >>= seed_hash2;
-    seed07 >>= seed_hash1;
-    seed08 >>= seed_hash2;
-    seed09 >>= seed_hash3;
-    seed10 >>= seed_hash3;
-    seed11 >>= seed_hash3;
-    seed12 >>= seed_hash3;
-
-    let a = (seed01 * x + seed02 * y + seed11 * z + ((right_num >> 14) as i32)) & 0x3F;
-    let b = (seed03 * x + seed04 * y + seed12 * z + ((right_num >> 10) as i32)) & 0x3F;
-    let mut c = (seed05 * x + seed06 * y + seed09 * z + ((right_num >> 6) as i32)) & 0x3F;
-    let mut d = (seed07 * x + seed08 * y + seed10 * z + ((right_num >> 2) as i32)) & 0x3F;
+    let a = (s01 * x + s02 * y + s11 * z + (right_num >> 14)) & 0x3F;
+    let b = (s03 * x + s04 * y + s12 * z + (right_num >> 10)) & 0x3F;
+    let mut c = (s05 * x + s06 * y + s09 * z + (right_num >> 6)) & 0x3F;
+    let mut d = (s07 * x + s08 * y + s10 * z + (right_num >> 2)) & 0x3F;
 
     if partition_count < 4 {
         d = 0;
@@ -706,13 +714,17 @@ fn compute_endpoints(
     true
 }
 
+/// Decodes the colour endpoint integers into `output_values`.
+///
+/// Returns `false` if the block encodes more colour values than `output_values` can
+/// hold (an illegal block; the C# reference throws an index exception here).
 fn decode_color_values(
     output_values: &mut [i32],
     color_bit_stream: &mut BitStream128,
     modes: &[u32],
     number_partitions: usize,
     number_bits_for_color_data: usize,
-) {
+) -> bool {
     let mut number_values = 0;
     for &mode in &modes[..number_partitions] {
         number_values += (((mode >> 2) + 1) as usize) << 1;
@@ -746,9 +758,12 @@ fn decode_color_values(
         number_values,
     );
 
+    if count > output_values.len() {
+        return false;
+    }
+
     let mut output_indices = 0;
-    for i in 0..count {
-        let int_encoded = &integer_encoded_sequence[i];
+    for int_encoded in &integer_encoded_sequence[..count] {
         let bit_length = int_encoded.number_bits as usize;
         let bit_value = int_encoded.bit_value as i32;
         let a = replicate((bit_value & 1) as u32, 1, 9) as i32;
@@ -822,9 +837,34 @@ fn decode_color_values(
             }
         }
     }
+    true
 }
 
+/// ASTC error colour (opaque magenta) as packed RGBA8, written for illegal blocks.
+pub const ASTC_ERROR_COLOR: u32 = 0xFFFF_00FF;
+
+/// Decompresses one 16-byte ASTC block into `output_buffer` (RGBA8 packed as `u32`).
+///
+/// Returns `false` for illegal or unsupported blocks; in that case the first
+/// `block_width * block_height` texels of `output_buffer` are filled with the ASTC
+/// error colour ([`ASTC_ERROR_COLOR`], opaque magenta) as the ASTC specification
+/// requires. Never panics for any 16-byte input, provided `output_buffer` holds at
+/// least `block_width * block_height` texels.
 pub fn decompress_block(
+    input_block: &[u8; 16],
+    output_buffer: &mut [u32],
+    block_width: usize,
+    block_height: usize,
+) -> bool {
+    let ok = decompress_block_inner(input_block, output_buffer, block_width, block_height);
+    if !ok {
+        let texels = min(block_width * block_height, output_buffer.len());
+        output_buffer[..texels].fill(ASTC_ERROR_COLOR);
+    }
+    ok
+}
+
+fn decompress_block_inner(
     input_block: &[u8; 16],
     output_buffer: &mut [u32],
     block_width: usize,
@@ -938,13 +978,15 @@ pub fn decompress_block(
     }
 
     let mut color_values = [0i32; 32];
-    decode_color_values(
+    if !decode_color_values(
         &mut color_values,
         &mut color_endpoint_stream,
         &color_endpoint_mode,
         number_partitions,
         color_data_bits,
-    );
+    ) {
+        return false;
+    }
 
     let mut endpoints = [[AstcPixel::default(); 2]; 4];
     let mut color_pos = 0;
@@ -1205,15 +1247,13 @@ pub fn decode_astc_to_rgba8(
             .try_into()
             .unwrap();
 
-        let ok = decompress_block(
+        // Illegal blocks come back filled with the ASTC error colour.
+        decompress_block(
             block_bytes,
             &mut decompressed_data,
             block_width,
             block_height,
         );
-        if !ok {
-            decompressed_data.fill(0);
-        }
 
         let local_block_idx = block_idx - level.start_block;
         write_decompressed_block(
@@ -1272,15 +1312,13 @@ pub fn decode_astc_to_rgba8_parallel(
             .unwrap();
 
         let mut decompressed_data = [0u32; 144];
-        let ok = decompress_block(
+        // Illegal blocks come back filled with the ASTC error colour.
+        decompress_block(
             block_bytes,
             &mut decompressed_data,
             block_width,
             block_height,
         );
-        if !ok {
-            decompressed_data.fill(0);
-        }
 
         let local_block_idx = block_idx - level.start_block;
         unsafe {

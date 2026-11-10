@@ -683,3 +683,297 @@ fn test_step2_batch_processor_differential_execution() {
         "Batch processor filter states diverged!"
     );
 }
+
+// =========================================================================
+// IN-PLACE COMMANDS (input_buffer_index == output_buffer_index)
+// =========================================================================
+
+/// Runs a single command on buffer 1 of a 3-buffer set where input == output, and
+/// returns (buffer 1 after, last_samples[0], state).
+fn run_in_place(cmd: DspCommandEntry, samples: &[f32]) -> (Vec<f32>, f32, BiquadFilterState) {
+    let n = samples.len();
+    let mut bufs = vec![7.0f32; 3 * n];
+    bufs[n..2 * n].copy_from_slice(samples);
+    let mut states = [BiquadFilterState::default()];
+    let mut last = [0.0f32];
+    let cmd = DspCommandEntry {
+        input_buffer_index: 1,
+        output_buffer_index: 1,
+        state_index: 0,
+        last_sample_index: 0,
+        ..cmd
+    };
+    assert_eq!(
+        process_command_batch(&mut bufs, 3, n, &[cmd], &mut states, &mut last),
+        Ok(1)
+    );
+    // Neighbouring buffers must be untouched.
+    assert!(bufs[..n].iter().chain(&bufs[2 * n..]).all(|&v| v == 7.0));
+    (bufs[n..2 * n].to_vec(), last[0], states[0])
+}
+
+fn in_place_samples() -> Vec<f32> {
+    vec![10.0, -3.0, 2.5, 101.0, -0.5, 1000.25, 3.5, -7.75]
+}
+
+#[test]
+fn test_in_place_volume() {
+    let x = in_place_samples();
+    let (out, _, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::Volume as u32,
+            volume0: 0.5,
+            ..Default::default()
+        },
+        &x,
+    );
+    // round-half-to-even(x * 0.5)
+    assert_eq!(out, vec![5.0, -2.0, 1.0, 50.0, -0.0, 500.0, 2.0, -4.0]);
+}
+
+#[test]
+fn test_in_place_volume_ramp() {
+    let x = vec![100.0f32; 4];
+    let (out, _, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::VolumeRamp as u32,
+            volume0: 0.0,
+            volume1: 1.0,
+            ..Default::default()
+        },
+        &x,
+    );
+    // volumes 0, 0.25, 0.5, 0.75
+    assert_eq!(out, vec![0.0, 25.0, 50.0, 75.0]);
+}
+
+#[test]
+fn test_in_place_mix() {
+    let x = in_place_samples();
+    let (out, _, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::Mix as u32,
+            volume0: 0.5,
+            ..Default::default()
+        },
+        &x,
+    );
+    // x + round-half-to-even(x * 0.5)
+    let expected: Vec<f32> = x.iter().map(|&v| v + (v * 0.5).round_ties_even()).collect();
+    assert_eq!(
+        expected,
+        vec![15.0, -5.0, 3.5, 151.0, -0.5, 1500.25, 5.5, -11.75]
+    );
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn test_in_place_mix_ramp() {
+    let x = vec![100.0f32; 4];
+    let (out, last, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::MixRamp as u32,
+            volume0: 0.0,
+            volume1: 1.0,
+            ..Default::default()
+        },
+        &x,
+    );
+    assert_eq!(out, vec![100.0, 125.0, 150.0, 175.0]);
+    assert_eq!(last, 75.0);
+}
+
+fn test_filter() -> BiquadFilterParameter {
+    BiquadFilterParameter {
+        enable: 1,
+        _reserved: [0; 3],
+        numerator: [0.5, 0.25, 0.125],
+        // Stored negated: a1 = 0.5, a2 = -0.25 -> [-0.5, 0.25]
+        denominator: [-0.5, 0.25],
+    }
+}
+
+/// Hand-written DF2 transposed reference (Ryujinx `ProcessBiquadFilter`).
+fn reference_df2(p: &BiquadFilterParameter, x: &[f32]) -> Vec<f32> {
+    let (mut s0, mut s1) = (0.0f32, 0.0f32);
+    x.iter()
+        .map(|&i| {
+            let o = i * p.numerator[0] + s0;
+            s0 = i * p.numerator[1] + o * p.denominator[0] + s1;
+            s1 = i * p.numerator[2] + o * p.denominator[1];
+            o
+        })
+        .collect()
+}
+
+/// Hand-written DF1 reference (Ryujinx `ProcessBiquadFilterAndMix*`), unmixed output.
+fn reference_df1(p: &BiquadFilterParameter, x: &[f32]) -> Vec<f32> {
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    x.iter()
+        .map(|&i| {
+            let o = i * p.numerator[0]
+                + x1 * p.numerator[1]
+                + x2 * p.numerator[2]
+                + y1 * p.denominator[0]
+                + y2 * p.denominator[1];
+            x2 = x1;
+            x1 = i;
+            y2 = y1;
+            y1 = o;
+            o
+        })
+        .collect()
+}
+
+#[test]
+fn test_in_place_biquad_filter() {
+    let x = in_place_samples();
+    let p = test_filter();
+    let (out, _, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::BiquadFilter as u32,
+            filter_param: p,
+            ..Default::default()
+        },
+        &x,
+    );
+    assert_eq!(out, reference_df2(&p, &x));
+    // First samples by hand: y0 = 0.5*10 = 5; y1 = 0.5*-3 + (0.25*10 + -0.5*5) = -1.5
+    assert_eq!(out[0], 5.0);
+    assert_eq!(out[1], -1.5);
+}
+
+#[test]
+fn test_in_place_biquad_filter_and_mix() {
+    let x = in_place_samples();
+    let p = test_filter();
+    let (out, _, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::BiquadFilterAndMix as u32,
+            filter_param: p,
+            volume0: 2.0,
+            ..Default::default()
+        },
+        &x,
+    );
+    let y = reference_df1(&p, &x);
+    let expected: Vec<f32> = x
+        .iter()
+        .zip(&y)
+        .map(|(&i, &o)| i + (o * 2.0).round_ties_even())
+        .collect();
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn test_in_place_biquad_filter_and_mix_ramp() {
+    let x = in_place_samples();
+    let p = test_filter();
+    let (out, last, _) = run_in_place(
+        DspCommandEntry {
+            opcode: DspOpcode::BiquadFilterAndMixRamp as u32,
+            filter_param: p,
+            volume0: 0.0,
+            volume1: 4.0,
+            ..Default::default()
+        },
+        &x,
+    );
+    let y = reference_df1(&p, &x);
+    let ramp = 4.0f32 / x.len() as f32;
+    let mut vol = 0.0f32;
+    let mut expected_last = 0.0;
+    let expected: Vec<f32> = x
+        .iter()
+        .zip(&y)
+        .map(|(&i, &o)| {
+            expected_last = (o * vol).round_ties_even();
+            vol += ramp;
+            i + expected_last
+        })
+        .collect();
+    assert_eq!(out, expected);
+    assert_eq!(last, expected_last);
+}
+
+#[test]
+fn test_in_place_matches_split_buffers() {
+    // The same command run in place and with distinct buffers (input copied first) must agree.
+    let x: Vec<f32> = (0..240).map(|i| ((i * 37) % 211) as f32 - 105.5).collect();
+    let n = x.len();
+    for opcode in [
+        DspOpcode::Mix,
+        DspOpcode::MixRamp,
+        DspOpcode::Volume,
+        DspOpcode::VolumeRamp,
+        DspOpcode::BiquadFilter,
+        DspOpcode::BiquadFilterAndMix,
+        DspOpcode::BiquadFilterAndMixRamp,
+    ] {
+        let base = DspCommandEntry {
+            opcode: opcode as u32,
+            volume0: 0.7,
+            volume1: 0.3,
+            filter_param: test_filter(),
+            state_index: 0,
+            last_sample_index: 0,
+            ..Default::default()
+        };
+        let (in_place, last_a, state_a) = run_in_place(base, &x);
+
+        let mut bufs = vec![0.0f32; 2 * n];
+        bufs[..n].copy_from_slice(&x);
+        bufs[n..].copy_from_slice(&x);
+        let mut states = [BiquadFilterState::default()];
+        let mut last = [0.0f32];
+        let cmd = DspCommandEntry {
+            input_buffer_index: 0,
+            output_buffer_index: 1,
+            ..base
+        };
+        process_command_batch(&mut bufs, 2, n, &[cmd], &mut states, &mut last).unwrap();
+        assert_eq!(in_place, bufs[n..].to_vec(), "{opcode:?}");
+        assert_eq!(last_a, last[0], "{opcode:?}");
+        assert_eq!(state_a, states[0], "{opcode:?}");
+
+        // Reverse index order (input after output) exercises the other split branch.
+        let mut bufs = vec![0.0f32; 2 * n];
+        bufs[..n].copy_from_slice(&x);
+        bufs[n..].copy_from_slice(&x);
+        let mut states = [BiquadFilterState::default()];
+        let cmd = DspCommandEntry {
+            input_buffer_index: 1,
+            output_buffer_index: 0,
+            ..base
+        };
+        process_command_batch(&mut bufs, 2, n, &[cmd], &mut states, &mut last).unwrap();
+        assert_eq!(in_place, bufs[..n].to_vec(), "{opcode:?} reversed");
+    }
+}
+
+#[test]
+fn test_ffi_in_place_aliased_pointers() {
+    let x = in_place_samples();
+    let mut buf = x.clone();
+    let p = buf.as_mut_ptr();
+    // SAFETY: `p` points at `buf.len()` floats; output and input alias exactly, which the FFI
+    // handles in place.
+    unsafe {
+        assert_eq!(ryu_dsp_mix(p, buf.len(), p, buf.len(), 0.5), DSP_STATUS_OK);
+    }
+    let expected: Vec<f32> = x.iter().map(|&v| v + (v * 0.5).round_ties_even()).collect();
+    assert_eq!(buf, expected);
+
+    let mut buf = x.clone();
+    let p = buf.as_mut_ptr();
+    let param = test_filter();
+    let mut state = BiquadFilterState::default();
+    // SAFETY: as above; `param` and `state` are valid for the call.
+    unsafe {
+        assert_eq!(
+            ryu_dsp_biquad_filter(p, buf.len(), p, buf.len(), &param, &mut state),
+            DSP_STATUS_OK
+        );
+    }
+    assert_eq!(buf, reference_df2(&param, &x));
+}

@@ -77,7 +77,7 @@ fn bench(c: &mut Criterion) {
         ..Default::default()
     };
 
-    blend_surface(&mut dst, W, H, &src, W, H, &rect, &m709);
+    blend_surface(&mut dst, W, H, &src, W, H, &rect, &m709).unwrap();
     let in_range = dst.iter().filter(|p| p.r > 0 && p.r < 1023).count();
     assert!(
         in_range > W * H / 2,
@@ -99,7 +99,8 @@ fn bench(c: &mut Criterion) {
                     H,
                     black_box(&rect),
                     black_box(&m709),
-                );
+                )
+                .unwrap();
                 black_box(&dst);
             })
         },
@@ -118,7 +119,8 @@ fn bench(c: &mut Criterion) {
                     H,
                     black_box(&rect),
                     black_box(&passthrough),
-                );
+                )
+                .unwrap();
                 black_box(&dst);
             })
         },

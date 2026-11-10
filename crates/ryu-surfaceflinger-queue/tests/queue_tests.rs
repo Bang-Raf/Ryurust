@@ -135,3 +135,121 @@ fn test_c_abi_lifecycle() {
 
     ryu_sf_queue_destroy(q);
 }
+
+fn item(slot: usize, frame: u64) -> QueueItem {
+    QueueItem {
+        slot: slot as i32,
+        frame_number: frame,
+        timestamp: frame as i64,
+        transform: 0,
+        scaling_mode: 0,
+        _pad: 0,
+    }
+}
+
+#[test]
+fn test_queue_rejects_slot_not_dequeued() {
+    let q = SurfaceFlingerQueue::new(4);
+    // Free slot: never dequeued.
+    assert!(!q.queue_buffer(item(0, 1)));
+    assert_eq!(q.get_counts(), (4, 0, 0, 0));
+    assert!(q.acquire_buffer().is_none());
+
+    // Out of range / negative.
+    assert!(!q.queue_buffer(item(64, 1)));
+    assert!(!q.queue_buffer(QueueItem {
+        slot: -1,
+        ..item(0, 1)
+    }));
+
+    // Double queue of the same slot.
+    let s = q.dequeue_slot(4).unwrap();
+    assert!(q.queue_buffer(item(s, 1)));
+    assert!(!q.queue_buffer(item(s, 2)));
+    assert_eq!(q.get_counts(), (3, 0, 1, 0));
+    assert_eq!(q.acquire_buffer().unwrap().frame_number, 1);
+    assert!(q.acquire_buffer().is_none());
+
+    // Release/cancel from the wrong state are rejected.
+    assert!(!q.cancel_buffer(s)); // acquired, not dequeued
+    assert!(q.release_buffer(s));
+    assert!(!q.release_buffer(s)); // already free
+    assert_eq!(q.get_counts(), (4, 0, 0, 0));
+
+    let c_ffi = ryu_sf_queue_create(2);
+    assert_eq!(ryu_sf_queue_queue_buffer(c_ffi, 0, 1, 1, 0, 0), 0);
+    ryu_sf_queue_destroy(c_ffi);
+}
+
+#[test]
+fn test_full_ring_rejects_without_leaking_slots() {
+    let q = SurfaceFlingerQueue::new(64);
+    // Fill the ring with 64 queued slots.
+    for f in 0..64u64 {
+        let s = q.dequeue_slot(64).unwrap();
+        assert!(q.queue_buffer(item(s, f)));
+    }
+    assert_eq!(q.get_counts(), (0, 0, 64, 0));
+
+    // Force slot 5 back to Dequeued externally (as C# sync can) and try to
+    // queue it again: the ring is full, so it must be rejected and left
+    // Dequeued; nothing in the ring is dropped.
+    q.sync_slot_state(5, BufferState::Dequeued as u8, 0);
+    assert!(!q.queue_buffer(item(5, 999)));
+    assert_eq!(q.get_counts(), (0, 1, 63, 0));
+    assert!(q.cancel_buffer(5));
+
+    let mut frames = Vec::new();
+    while let Some(it) = q.acquire_buffer() {
+        frames.push(it.frame_number);
+        q.release_buffer(it.slot as usize);
+    }
+    assert_eq!(frames, (0..64).collect::<Vec<_>>());
+    assert_eq!(q.get_counts(), (64, 0, 0, 0));
+}
+
+#[test]
+fn test_two_thread_stress_no_slot_leak() {
+    const SLOTS: usize = 4;
+    const TOTAL_FRAMES: u64 = 200_000;
+    let q = Arc::new(SurfaceFlingerQueue::new(SLOTS));
+    let q_prod = Arc::clone(&q);
+    let q_cons = Arc::clone(&q);
+
+    let prod = thread::spawn(move || {
+        let mut frame = 1u64;
+        let mut cancels = 0u64;
+        while frame <= TOTAL_FRAMES {
+            let Some(slot) = q_prod.dequeue_slot(SLOTS) else {
+                std::hint::spin_loop();
+                continue;
+            };
+            // Occasionally cancel instead of queuing.
+            if frame % 97 == 0 && cancels < frame / 97 {
+                cancels += 1;
+                assert!(q_prod.cancel_buffer(slot));
+                continue;
+            }
+            assert!(q_prod.queue_buffer(item(slot, frame)));
+            frame += 1;
+        }
+    });
+
+    let cons = thread::spawn(move || {
+        let mut expected = 1u64;
+        while expected <= TOTAL_FRAMES {
+            if let Some(it) = q_cons.acquire_buffer() {
+                assert_eq!(it.frame_number, expected);
+                assert!(q_cons.release_buffer(it.slot as usize));
+                expected += 1;
+            } else {
+                std::hint::spin_loop();
+            }
+        }
+    });
+
+    prod.join().unwrap();
+    cons.join().unwrap();
+    assert_eq!(q.get_counts(), (SLOTS as u32, 0, 0, 0));
+    assert!(q.acquire_buffer().is_none());
+}

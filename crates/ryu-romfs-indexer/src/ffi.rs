@@ -64,7 +64,7 @@ pub extern "C" fn ryu_romfs_find_file(
 #[no_mangle]
 pub extern "C" fn ryu_romfs_hash(parent: u32, name: *const u8, name_len: usize) -> u32 {
     if name.is_null() || name_len == 0 {
-        return parent ^ 12345678u32;
+        return romfs_hash(parent, &[]);
     }
     let slice = unsafe { slice::from_raw_parts(name, name_len) };
     romfs_hash(parent, slice)

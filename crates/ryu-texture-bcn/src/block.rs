@@ -102,3 +102,47 @@ impl RgbaColor8 {
         }
     }
 }
+
+/// A decoded texel that can be stored little-endian into a byte buffer.
+pub(crate) trait TexelLe: Copy {
+    const SIZE: usize;
+    fn store(self, out: &mut [u8]);
+}
+
+macro_rules! impl_texel_le {
+    ($($t:ty),*) => {$(
+        impl TexelLe for $t {
+            const SIZE: usize = std::mem::size_of::<$t>();
+            #[inline(always)]
+            fn store(self, out: &mut [u8]) {
+                out.copy_from_slice(&self.to_le_bytes());
+            }
+        }
+    )*};
+}
+impl_texel_le!(u16, u32, u64);
+
+/// Copies the visible `bw` x `bh` region of a decoded 4x4 `tile` into `dst`, a byte
+/// buffer of texels with a row pitch of `stride_texels`, at texel (`x_base`, `y_base`).
+///
+/// `dst` has no alignment requirement: texels are written as little-endian bytes,
+/// which compiles to plain (unaligned) stores.
+#[inline(always)]
+pub(crate) fn store_tile<T: TexelLe>(
+    dst: &mut [u8],
+    tile: &[T; 16],
+    stride_texels: usize,
+    x_base: usize,
+    y_base: usize,
+    bw: usize,
+    bh: usize,
+) {
+    for ty in 0..bh {
+        let start = ((y_base + ty) * stride_texels + x_base) * T::SIZE;
+        let row = &mut dst[start..start + bw * T::SIZE];
+        let tile_row = &tile[ty * 4..ty * 4 + bw];
+        for (out, &texel) in row.chunks_exact_mut(T::SIZE).zip(tile_row) {
+            texel.store(out);
+        }
+    }
+}

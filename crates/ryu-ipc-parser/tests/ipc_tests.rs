@@ -302,3 +302,155 @@ fn test_differential_bitfield_unpacking() {
     assert_eq!(parsed.send_buffs[0].size, expected_size);
     assert_eq!(parsed.send_buffs[0].flags, expected_flags);
 }
+
+fn buff(position: u64, size: u64, flags: u8) -> IpcBufferDesc {
+    IpcBufferDesc {
+        position,
+        size,
+        flags,
+        _padding: [0; 7],
+    }
+}
+
+fn fill_abw(msg: &mut ParsedIpcMessage) {
+    // Exercise the high position bits (32..38) and size bits (32..35).
+    msg.send_buff_count = 2;
+    msg.send_buffs[0] = buff(0x7f_8765_4321, 0xf_1234_5678, 1);
+    msg.send_buffs[1] = buff(0x1000, 0x20, 0);
+    msg.recv_buff_count = 3;
+    msg.recv_buffs[0] = buff(0x0a_0000_1000, 0x1_0000_0000, 2);
+    msg.recv_buffs[1] = buff(0x40_0000_0000, 0x100, 3);
+    msg.recv_buffs[2] = buff(0x2000, 0x8_0000_0001, 0);
+    msg.xchg_buff_count = 1;
+    msg.xchg_buffs[0] = buff(0x35_dead_beef, 0x7_cafe_f00d, 1);
+}
+
+fn assert_abw_eq(a: &ParsedIpcMessage, b: &ParsedIpcMessage) {
+    assert_eq!(a.send_buff_count, b.send_buff_count);
+    assert_eq!(a.recv_buff_count, b.recv_buff_count);
+    assert_eq!(a.xchg_buff_count, b.xchg_buff_count);
+    assert_eq!(
+        a.send_buffs[..a.send_buff_count as usize],
+        b.send_buffs[..b.send_buff_count as usize]
+    );
+    assert_eq!(
+        a.recv_buffs[..a.recv_buff_count as usize],
+        b.recv_buffs[..b.recv_buff_count as usize]
+    );
+    assert_eq!(
+        a.xchg_buffs[..a.xchg_buff_count as usize],
+        b.xchg_buffs[..b.xchg_buff_count as usize]
+    );
+}
+
+#[test]
+fn test_cmif_round_trip_with_abw_descriptors() {
+    for cmd_ptr in [0i64, 4, 8, 12, 0x1234_5670 + 0xc] {
+        let mut msg = ParsedIpcMessage::default();
+        msg.msg_type = 4;
+        msg.handle_desc_enabled = 1;
+        msg.handle_desc.has_pid = 1;
+        msg.handle_desc.pid = 42;
+        msg.handle_desc.move_count = 2;
+        msg.handle_desc.move_handles[0] = 9;
+        msg.handle_desc.move_handles[1] = -3;
+        msg.ptr_buff_count = 1;
+        msg.ptr_buffs[0] = IpcPtrBufferDesc {
+            position: 0x5000_0000,
+            size: 64,
+            index: 3,
+            _padding: 0,
+        };
+        fill_abw(&mut msg);
+
+        let raw = b"SFCI\0\0\0\0payload!";
+        let mut out = [0u8; 512];
+        let written = serialize_cmif(&msg, raw, cmd_ptr, 0xC000_0000, &mut out).expect("serialize");
+        let parsed = parse_ipc_message(&out[..written], cmd_ptr).expect("re-parse");
+
+        assert_eq!(parsed.msg_type, 4);
+        assert_eq!(parsed.handle_desc.pid, 42);
+        assert_eq!(parsed.handle_desc.move_count, 2);
+        assert_eq!(parsed.handle_desc.move_handles[..2], [9, -3]);
+        assert_eq!(parsed.ptr_buff_count, 1);
+        assert_eq!(parsed.ptr_buffs[0], msg.ptr_buffs[0]);
+        assert_abw_eq(&parsed, &msg);
+
+        // Raw data lands 16-byte aligned (relative to cmd_ptr) and intact.
+        let off = parsed.raw_data_offset as usize;
+        assert_eq!((off as i64 + cmd_ptr) & 0xf, 0);
+        assert_eq!(&out[off..off + raw.len()], raw);
+        assert_eq!(parsed.recv_list_count, 1);
+        assert_eq!(parsed.recv_list_buffs[0].position, 0xC000_0000);
+    }
+}
+
+#[test]
+fn test_tipc_round_trip_with_abw_descriptors() {
+    let mut msg = ParsedIpcMessage::default();
+    msg.msg_type = 0x10;
+    msg.handle_desc_enabled = 1;
+    msg.handle_desc.copy_count = 1;
+    msg.handle_desc.copy_handles[0] = 55;
+    fill_abw(&mut msg);
+
+    // Unaligned raw length: must be zero-padded to the advertised word count.
+    let raw = b"12345";
+    let mut out = [0xffu8; 256];
+    let mut out_len = 0usize;
+    // SAFETY: all pointers are valid for the given lengths.
+    let res = unsafe {
+        ryu_ipc_serialize_tipc(
+            &msg,
+            raw.as_ptr(),
+            raw.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut out_len,
+        )
+    };
+    assert_eq!(res, 0);
+    assert_eq!(out_len, 8 + 8 + 6 * 12 + 8);
+
+    let parsed = parse_ipc_message(&out[..out_len], 0).expect("re-parse");
+    assert_eq!(parsed.msg_type, 0x10);
+    assert_eq!(parsed.handle_desc.copy_handles[0], 55);
+    assert_abw_eq(&parsed, &msg);
+    let off = parsed.raw_data_offset as usize;
+    assert_eq!(parsed.raw_data_length, 8);
+    assert_eq!(&out[off..off + 8], b"12345\0\0\0");
+}
+
+#[test]
+fn test_serialize_rejects_counts_over_header_width() {
+    let mut out = [0u8; 4096];
+    let mut msg = ParsedIpcMessage::default();
+    msg.msg_type = 4;
+    msg.send_buff_count = 16;
+    assert_eq!(
+        serialize_cmif(&msg, &[], 0, 0, &mut out),
+        Err(IpcSerializeError::InvalidData)
+    );
+    assert_eq!(
+        serialize_tipc(&msg, &[], &mut out),
+        Err(IpcSerializeError::InvalidData)
+    );
+
+    let mut msg = ParsedIpcMessage::default();
+    msg.handle_desc_enabled = 1;
+    msg.handle_desc.copy_count = 16;
+    assert_eq!(
+        serialize_cmif(&msg, &[], 0, 0, &mut out),
+        Err(IpcSerializeError::InvalidData)
+    );
+
+    // Too-small output buffer accounts for the descriptor bytes.
+    let mut msg = ParsedIpcMessage::default();
+    msg.msg_type = 0x10;
+    fill_abw(&mut msg);
+    let mut small = [0u8; 8 + 6 * 12 - 1];
+    assert_eq!(
+        serialize_tipc(&msg, &[], &mut small),
+        Err(IpcSerializeError::OutputBufferTooSmall)
+    );
+}

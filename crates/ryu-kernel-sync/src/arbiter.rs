@@ -48,6 +48,10 @@ impl ShardData {
         false
     }
 
+    /// Wakes up to `count` waiters (`count <= 0` means all, as in C#
+    /// `KAddressArbiter.WakeThreads`), but never more than `out_woken` can
+    /// report: every removed waiter is written to `out_woken`. Waiters that do
+    /// not fit stay queued, so the caller can call again for the remainder.
     fn wake_waiters(&mut self, address: u64, count: i32, out_woken: &mut [u64]) -> usize {
         if let Some(list) = self.waiters.get_mut(&address) {
             let valid_count = if count <= 0 {
@@ -55,19 +59,17 @@ impl ShardData {
             } else {
                 list.len().min(count as usize)
             };
+            let to_wake = valid_count.min(out_woken.len());
 
-            let to_copy = valid_count.min(out_woken.len());
-            for i in 0..to_copy {
-                out_woken[i] = list[i].thread_id;
+            for (dst, w) in out_woken.iter_mut().zip(list.drain(0..to_wake)) {
+                *dst = w.thread_id;
             }
-
-            list.drain(0..valid_count);
 
             if list.is_empty() {
                 self.waiters.remove(&address);
             }
 
-            to_copy
+            to_wake
         } else {
             0
         }

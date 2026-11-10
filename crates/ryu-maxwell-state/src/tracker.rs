@@ -91,6 +91,10 @@ impl MaxwellStateTracker {
 
     /// Fast scan comparing current state registers against shadow state.
     /// Uses AVX2 vectorization on supported x86_64 CPUs, otherwise scalar fallback.
+    ///
+    /// Newly dirty groups are OR-ed into the accumulated dirty mask, which is
+    /// returned. The mask is never cleared here; call [`Self::clear_dirty`]
+    /// once the dirty groups have been processed.
     pub fn scan_changes(&mut self, current: &[u8], shadow: &[u8]) -> u64 {
         let len = current.len().min(shadow.len()).min(MAXWELL_STATE_BYTES);
 

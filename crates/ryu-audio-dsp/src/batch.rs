@@ -1,4 +1,4 @@
-use crate::dsp;
+use crate::dsp::{self, InPlace, Split};
 use crate::filter::{self, BiquadFilterParameter, BiquadFilterState};
 
 #[repr(u32)]
@@ -63,8 +63,65 @@ impl Default for DspCommandEntry {
     }
 }
 
+/// The input/output view of the mix buffers for one command.
+enum CommandBuffers<'a> {
+    /// `input_buffer_index != output_buffer_index`: two disjoint slices.
+    Split(Split<'a>),
+    /// `input_buffer_index == output_buffer_index`: one slice that is read and written.
+    InPlace(InPlace<'a>),
+}
+
+/// Borrows buffer `in_idx` (read) and `out_idx` (written) out of `mix_buffers` without
+/// aliasing a `&[f32]` with a `&mut [f32]`. Both indices must be `< buffer_count`, with
+/// `mix_buffers.len() >= buffer_count * sample_count`.
+fn command_buffers(
+    mix_buffers: &mut [f32],
+    sample_count: usize,
+    in_idx: usize,
+    out_idx: usize,
+) -> CommandBuffers<'_> {
+    let in_off = in_idx * sample_count;
+    let out_off = out_idx * sample_count;
+    if in_idx == out_idx {
+        return CommandBuffers::InPlace(InPlace(&mut mix_buffers[out_off..out_off + sample_count]));
+    }
+    if in_idx < out_idx {
+        let (lo, hi) = mix_buffers.split_at_mut(out_off);
+        CommandBuffers::Split(Split::new(
+            &mut hi[..sample_count],
+            &lo[in_off..in_off + sample_count],
+        ))
+    } else {
+        let (lo, hi) = mix_buffers.split_at_mut(in_off);
+        CommandBuffers::Split(Split::new(
+            &mut lo[out_off..out_off + sample_count],
+            &hi[..sample_count],
+        ))
+    }
+}
+
+/// Runs `$body` with `$io` bound to the concrete `SampleIo` of `$bufs`, so each kernel is
+/// monomorphised for the split and the in-place case (no per-sample branching).
+macro_rules! with_io {
+    ($bufs:expr, |$io:ident| $body:expr) => {
+        match $bufs {
+            CommandBuffers::Split(mut split) => {
+                let $io = &mut split;
+                $body
+            }
+            CommandBuffers::InPlace(mut in_place) => {
+                let $io = &mut in_place;
+                $body
+            }
+        }
+    };
+}
+
 /// Executes a batch of DSP commands across the 5ms quantum mix buffers.
 /// Returns the number of successfully executed commands, or a negative error code.
+///
+/// Commands whose input and output buffer index are equal are processed in place, with the
+/// same per-sample semantics as Ryujinx's C# commands running on aliased spans.
 pub fn process_command_batch(
     mix_buffers: &mut [f32],
     buffer_count: usize,
@@ -79,7 +136,6 @@ pub fn process_command_batch(
     }
 
     let mut executed_count = 0usize;
-    let base_ptr = mix_buffers.as_mut_ptr();
 
     for cmd in commands {
         let opcode = DspOpcode::from_u32(cmd.opcode);
@@ -89,6 +145,7 @@ pub fn process_command_batch(
 
         let in_idx = cmd.input_buffer_index as usize;
         let out_idx = cmd.output_buffer_index as usize;
+        let indices_valid = in_idx < buffer_count && out_idx < buffer_count;
 
         match opcode {
             DspOpcode::ClearBuffers => {
@@ -101,42 +158,23 @@ pub fn process_command_batch(
                 }
             }
             DspOpcode::CopyBuffer => {
-                if in_idx < buffer_count && out_idx < buffer_count && in_idx != out_idx {
-                    unsafe {
-                        let src_ptr = base_ptr.add(in_idx * sample_count);
-                        let dst_ptr = base_ptr.add(out_idx * sample_count);
-                        std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, sample_count);
-                    }
+                if indices_valid && in_idx != out_idx {
+                    let src = in_idx * sample_count;
+                    let dst = out_idx * sample_count;
+                    mix_buffers.copy_within(src..src + sample_count, dst);
                 }
             }
             DspOpcode::Mix => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    unsafe {
-                        let src_slice = std::slice::from_raw_parts(
-                            base_ptr.add(in_idx * sample_count),
-                            sample_count,
-                        );
-                        let dst_slice = std::slice::from_raw_parts_mut(
-                            base_ptr.add(out_idx * sample_count),
-                            sample_count,
-                        );
-                        dsp::mix(dst_slice, src_slice, cmd.volume0);
-                    }
+                if indices_valid {
+                    let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                    with_io!(bufs, |io| dsp::mix_io(io, cmd.volume0));
                 }
             }
             DspOpcode::MixRamp => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    let last_s = unsafe {
-                        let src_slice = std::slice::from_raw_parts(
-                            base_ptr.add(in_idx * sample_count),
-                            sample_count,
-                        );
-                        let dst_slice = std::slice::from_raw_parts_mut(
-                            base_ptr.add(out_idx * sample_count),
-                            sample_count,
-                        );
-                        dsp::mix_ramp(dst_slice, src_slice, cmd.volume0, cmd.volume1)
-                    };
+                if indices_valid {
+                    let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                    let last_s =
+                        with_io!(bufs, |io| dsp::mix_ramp_io(io, cmd.volume0, cmd.volume1));
                     let ls_idx = cmd.last_sample_index as usize;
                     if ls_idx < last_samples.len() {
                         last_samples[ls_idx] = last_s;
@@ -144,104 +182,53 @@ pub fn process_command_batch(
                 }
             }
             DspOpcode::Volume => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    unsafe {
-                        let src_slice = std::slice::from_raw_parts(
-                            base_ptr.add(in_idx * sample_count),
-                            sample_count,
-                        );
-                        let dst_slice = std::slice::from_raw_parts_mut(
-                            base_ptr.add(out_idx * sample_count),
-                            sample_count,
-                        );
-                        dsp::volume(dst_slice, src_slice, cmd.volume0);
-                    }
+                if indices_valid {
+                    let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                    with_io!(bufs, |io| dsp::volume_io(io, cmd.volume0));
                 }
             }
             DspOpcode::VolumeRamp => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    unsafe {
-                        let src_slice = std::slice::from_raw_parts(
-                            base_ptr.add(in_idx * sample_count),
-                            sample_count,
-                        );
-                        let dst_slice = std::slice::from_raw_parts_mut(
-                            base_ptr.add(out_idx * sample_count),
-                            sample_count,
-                        );
-                        dsp::volume_ramp(dst_slice, src_slice, cmd.volume0, cmd.volume1);
-                    }
+                if indices_valid {
+                    let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                    with_io!(bufs, |io| dsp::volume_ramp_io(io, cmd.volume0, cmd.volume1));
                 }
             }
             DspOpcode::BiquadFilter => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    let st_idx = cmd.state_index as usize;
-                    if st_idx < states.len() {
-                        unsafe {
-                            let src_slice = std::slice::from_raw_parts(
-                                base_ptr.add(in_idx * sample_count),
-                                sample_count,
-                            );
-                            let dst_slice = std::slice::from_raw_parts_mut(
-                                base_ptr.add(out_idx * sample_count),
-                                sample_count,
-                            );
-                            filter::process_biquad_filter_df2(
-                                &cmd.filter_param,
-                                &mut states[st_idx],
-                                dst_slice,
-                                src_slice,
-                            );
-                        }
+                if indices_valid {
+                    if let Some(state) = states.get_mut(cmd.state_index as usize) {
+                        let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                        with_io!(bufs, |io| filter::biquad_df2_io(
+                            &cmd.filter_param,
+                            state,
+                            io
+                        ));
                     }
                 }
             }
             DspOpcode::BiquadFilterAndMix => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    let st_idx = cmd.state_index as usize;
-                    if st_idx < states.len() {
-                        unsafe {
-                            let src_slice = std::slice::from_raw_parts(
-                                base_ptr.add(in_idx * sample_count),
-                                sample_count,
-                            );
-                            let dst_slice = std::slice::from_raw_parts_mut(
-                                base_ptr.add(out_idx * sample_count),
-                                sample_count,
-                            );
-                            filter::process_biquad_filter_and_mix_df1(
-                                &cmd.filter_param,
-                                &mut states[st_idx],
-                                dst_slice,
-                                src_slice,
-                                cmd.volume0,
-                            );
-                        }
+                if indices_valid {
+                    if let Some(state) = states.get_mut(cmd.state_index as usize) {
+                        let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                        with_io!(bufs, |io| filter::biquad_and_mix_df1_io(
+                            &cmd.filter_param,
+                            state,
+                            io,
+                            cmd.volume0
+                        ));
                     }
                 }
             }
             DspOpcode::BiquadFilterAndMixRamp => {
-                if in_idx < buffer_count && out_idx < buffer_count {
-                    let st_idx = cmd.state_index as usize;
-                    if st_idx < states.len() {
-                        let last_s = unsafe {
-                            let src_slice = std::slice::from_raw_parts(
-                                base_ptr.add(in_idx * sample_count),
-                                sample_count,
-                            );
-                            let dst_slice = std::slice::from_raw_parts_mut(
-                                base_ptr.add(out_idx * sample_count),
-                                sample_count,
-                            );
-                            filter::process_biquad_filter_and_mix_ramp_df1(
-                                &cmd.filter_param,
-                                &mut states[st_idx],
-                                dst_slice,
-                                src_slice,
-                                cmd.volume0,
-                                cmd.volume1,
-                            )
-                        };
+                if indices_valid {
+                    if let Some(state) = states.get_mut(cmd.state_index as usize) {
+                        let bufs = command_buffers(mix_buffers, sample_count, in_idx, out_idx);
+                        let last_s = with_io!(bufs, |io| filter::biquad_and_mix_ramp_df1_io(
+                            &cmd.filter_param,
+                            state,
+                            io,
+                            cmd.volume0,
+                            cmd.volume1
+                        ));
                         let ls_idx = cmd.last_sample_index as usize;
                         if ls_idx < last_samples.len() {
                             last_samples[ls_idx] = last_s;

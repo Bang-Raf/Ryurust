@@ -31,13 +31,15 @@ impl BitStream128 {
         self.data.to_le_bytes()
     }
 
+    /// Reads `bit_count` (at most 32) bits. Reading past the end of the stream yields
+    /// zero bits, as in the C# `BitStream128`; malformed blocks can request more
+    /// bits than remain, so this must not panic.
     #[inline(always)]
     pub fn read_bits(&mut self, bit_count: usize) -> u32 {
         if bit_count == 0 {
             return 0;
         }
         debug_assert!(bit_count <= 32);
-        debug_assert!(bit_count <= self.bits_left);
 
         let mask = if bit_count == 32 {
             0xFFFF_FFFFu128
@@ -47,7 +49,7 @@ impl BitStream128 {
 
         let value = (self.data & mask) as u32;
         self.data >>= bit_count;
-        self.bits_left -= bit_count;
+        self.bits_left = self.bits_left.saturating_sub(bit_count);
         value
     }
 

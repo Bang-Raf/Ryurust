@@ -1,0 +1,1096 @@
+audio_dsp/mix_ramp/240  time:   [556.18 ns 560.19 ns 564.33 ns]
+                        thrpt:  [425.28 Melem/s 428.42 Melem/s 431.51 Melem/s]
+                 change:
+                        time:   [+2.4863% +3.3686% +4.1860%] (p = 0.00 < 0.05)
+                        thrpt:  [-4.0178% -3.2589% -2.4260%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low severe
+  1 (3.33%) high mild
+audio_dsp/biquad_df2/240
+                        time:   [576.16 ns 578.28 ns 580.37 ns]
+                        thrpt:  [413.53 Melem/s 415.02 Melem/s 416.55 Melem/s]
+                 change:
+                        time:   [+1.5574% +2.3711% +3.1622%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.0653% -2.3162% -1.5335%]
+                        Performance has regressed.
+audio_dsp/biquad_and_mix_df1/240
+                        time:   [1.3049 µs 1.3164 µs 1.3314 µs]
+                        thrpt:  [180.26 Melem/s 182.32 Melem/s 183.92 Melem/s]
+                 change:
+                        time:   [-9.7537% -3.8964% +0.3554%] (p = 0.18 > 0.05)
+                        thrpt:  [-0.3541% +4.0544% +10.808%]
+                        No change in performance detected.
+Found 5 outliers among 30 measurements (16.67%)
+  2 (6.67%) high mild
+  3 (10.00%) high severe
+audio_dsp/command_batch/61cmd_64x240
+                        time:   [22.569 µs 22.694 µs 22.811 µs]
+                        thrpt:  [641.79 Melem/s 645.11 Melem/s 648.68 Melem/s]
+                 change:
+                        time:   [-8.8478% -3.0053% +0.7828%] (p = 0.40 > 0.05)
+                        thrpt:  [-0.7767% +3.0984% +9.7066%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) high mild
+  2 (6.67%) high severe
+
+audio_fx/biquad_filter/240
+                        time:   [583.16 ns 585.65 ns 588.62 ns]
+                        thrpt:  [407.73 Melem/s 409.80 Melem/s 411.55 Melem/s]
+                 change:
+                        time:   [+1.5832% +2.6668% +3.7418%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.6068% -2.5975% -1.5586%]
+                        Performance has regressed.
+Found 4 outliers among 30 measurements (13.33%)
+  2 (6.67%) low mild
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+audio_fx/biquad_filter_and_mix/240
+                        time:   [1.3065 µs 1.3124 µs 1.3207 µs]
+                        thrpt:  [181.72 Melem/s 182.87 Melem/s 183.70 Melem/s]
+                 change:
+                        time:   [+1.5294% +2.3637% +3.1269%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.0321% -2.3091% -1.5064%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+audio_fx/double_biquad_filter_and_mix/240
+                        time:   [1.3970 µs 1.4040 µs 1.4127 µs]
+                        thrpt:  [169.88 Melem/s 170.94 Melem/s 171.80 Melem/s]
+                 change:
+                        time:   [+2.3116% +2.8605% +3.4296%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.3159% -2.7809% -2.2594%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+audio_fx/multi_biquad_4stage/240
+                        time:   [2.9678 µs 2.9848 µs 3.0070 µs]
+                        thrpt:  [79.815 Melem/s 80.409 Melem/s 80.867 Melem/s]
+                 change:
+                        time:   [-0.1935% +0.3973% +0.9925%] (p = 0.24 > 0.05)
+                        thrpt:  [-0.9827% -0.3957% +0.1939%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+audio_mixer/mix_buffer/240
+                        time:   [24.556 ns 24.685 ns 24.832 ns]
+                        thrpt:  [9.6651 Gelem/s 9.7227 Gelem/s 9.7736 Gelem/s]
+                 change:
+                        time:   [-11.937% -5.6577% -0.5181%] (p = 0.06 > 0.05)
+                        thrpt:  [+0.5208% +5.9970% +13.554%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+audio_mixer/mix_ramp/240
+                        time:   [577.37 ns 580.80 ns 584.92 ns]
+                        thrpt:  [410.32 Melem/s 413.22 Melem/s 415.68 Melem/s]
+                 change:
+                        time:   [+0.5801% +1.0924% +1.6437%] (p = 0.00 < 0.05)
+                        thrpt:  [-1.6172% -1.0806% -0.5768%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high severe
+audio_mixer/mix_batch/128voices_x240
+                        time:   [2.4894 µs 2.5149 µs 2.5387 µs]
+                        thrpt:  [12.101 Gelem/s 12.215 Gelem/s 12.341 Gelem/s]
+                 change:
+                        time:   [-20.950% -12.723% -5.1929%] (p = 0.00 < 0.05)
+                        thrpt:  [+5.4773% +14.578% +26.502%]
+                        Performance has improved.
+audio_mixer/mix_matrix/1to6_x240
+                        time:   [115.93 ns 116.54 ns 117.25 ns]
+                        thrpt:  [12.281 Gelem/s 12.357 Gelem/s 12.421 Gelem/s]
+                 change:
+                        time:   [+4.6316% +18.012% +28.741%] (p = 0.00 < 0.05)
+                        thrpt:  [-22.325% -15.263% -4.4265%]
+                        Performance has regressed.
+
+audio_resampler/resample_default_4tap/32k_to_48k_240
+                        time:   [2.1829 µs 2.1980 µs 2.2179 µs]
+                        thrpt:  [108.21 Melem/s 109.19 Melem/s 109.95 Melem/s]
+                 change:
+                        time:   [-1.2773% -0.7391% -0.1303%] (p = 0.01 < 0.05)
+                        thrpt:  [+0.1305% +0.7446% +1.2938%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+audio_resampler/resample_high_8tap/32k_to_48k_240
+                        time:   [2.4178 µs 2.4332 µs 2.4499 µs]
+                        thrpt:  [97.964 Melem/s 98.636 Melem/s 99.264 Melem/s]
+                 change:
+                        time:   [-15.683% -8.2245% -1.6503%] (p = 0.02 < 0.05)
+                        thrpt:  [+1.6780% +8.9615% +18.600%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+audio_resampler/decode_adpcm/4200
+                        time:   [9.8546 µs 9.8863 µs 9.9162 µs]
+                        thrpt:  [423.55 Melem/s 424.83 Melem/s 426.20 Melem/s]
+                 change:
+                        time:   [-4.8915% -2.6828% -1.0922%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.1043% +2.7567% +5.1430%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+
+buffer_diff/find_dirty_range/4096
+                        time:   [34.251 ns 34.458 ns 34.726 ns]
+                        thrpt:  [109.85 GiB/s 110.70 GiB/s 111.37 GiB/s]
+                 change:
+                        time:   [-0.6948% +0.2169% +1.1153%] (p = 0.66 > 0.05)
+                        thrpt:  [-1.1030% -0.2165% +0.6997%]
+                        No change in performance detected.
+Found 9 outliers among 30 measurements (30.00%)
+  3 (10.00%) low mild
+  2 (6.67%) high mild
+  4 (13.33%) high severe
+buffer_diff/find_dirty_range/65536
+                        time:   [1.0045 µs 1.0092 µs 1.0135 µs]
+                        thrpt:  [60.222 GiB/s 60.478 GiB/s 60.761 GiB/s]
+                 change:
+                        time:   [-1.0999% -0.1398% +0.8105%] (p = 0.77 > 0.05)
+                        thrpt:  [-0.8039% +0.1400% +1.1121%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+buffer_diff/is_equal_fast/4096
+                        time:   [49.074 ns 49.314 ns 49.546 ns]
+                        thrpt:  [76.992 GiB/s 77.356 GiB/s 77.734 GiB/s]
+                 change:
+                        time:   [+10.146% +10.898% +11.633%] (p = 0.00 < 0.05)
+                        thrpt:  [-10.421% -9.8267% -9.2111%]
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) low mild
+  2 (6.67%) high mild
+buffer_diff/diff_and_copy/65536
+                        time:   [1.3246 µs 1.3362 µs 1.3495 µs]
+                        thrpt:  [45.227 GiB/s 45.679 GiB/s 46.077 GiB/s]
+                 change:
+                        time:   [+19.969% +21.289% +22.605%] (p = 0.00 < 0.05)
+                        thrpt:  [-18.437% -17.552% -16.645%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+
+common_hash/xxh3_128/4KiB
+                        time:   [58.673 ns 59.047 ns 59.480 ns]
+                        thrpt:  [64.134 GiB/s 64.604 GiB/s 65.016 GiB/s]
+                 change:
+                        time:   [-1.1350% -0.1513% +0.7384%] (p = 0.76 > 0.05)
+                        thrpt:  [-0.7330% +0.1516% +1.1480%]
+                        No change in performance detected.
+Found 4 outliers among 30 measurements (13.33%)
+  2 (6.67%) low mild
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+common_hash/xxh3_128/1MiB
+                        time:   [17.478 µs 17.616 µs 17.767 µs]
+                        thrpt:  [54.964 GiB/s 55.435 GiB/s 55.874 GiB/s]
+                 change:
+                        time:   [-1.1411% -0.3391% +0.4309%] (p = 0.40 > 0.05)
+                        thrpt:  [-0.4290% +0.3403% +1.1543%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+common_hash/batch_parallel/256x4KiB
+                        time:   [18.141 µs 19.342 µs 21.295 µs]
+                        thrpt:  [45.859 GiB/s 50.490 GiB/s 53.833 GiB/s]
+                 change:
+                        time:   [-1.5567% +5.6122% +13.271%] (p = 0.13 > 0.05)
+                        thrpt:  [-11.716% -5.3140% +1.5814%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+
+gal_queue/spsc_fill_drain/256
+                        time:   [7.7909 µs 7.8724 µs 7.9444 µs]
+                        thrpt:  [32.224 Melem/s 32.519 Melem/s 32.859 Melem/s]
+                 change:
+                        time:   [+0.2628% +1.2594% +2.1892%] (p = 0.01 < 0.05)
+                        thrpt:  [-2.1423% -1.2437% -0.2621%]
+                        Change within noise threshold.
+gal_queue/spsc_two_thread_transfer
+                        time:   [81.644 ns 83.319 ns 84.830 ns]
+                        thrpt:  [11.788 Melem/s 12.002 Melem/s 12.248 Melem/s]
+                 change:
+                        time:   [-1.2833% +1.1509% +3.8523%] (p = 0.40 > 0.05)
+                        thrpt:  [-3.7094% -1.1378% +1.3000%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+gal_queue/span_pool_insert_consume/64
+                        time:   [16.577 ns 16.675 ns 16.772 ns]
+                        thrpt:  [3.5539 GiB/s 3.5745 GiB/s 3.5957 GiB/s]
+                 change:
+                        time:   [-35.158% -25.487% -14.444%] (p = 0.00 < 0.05)
+                        thrpt:  [+16.882% +34.205% +54.220%]
+                        Performance has improved.
+gal_queue/span_pool_insert_consume/4096
+                        time:   [103.38 ns 103.80 ns 104.18 ns]
+                        thrpt:  [36.618 GiB/s 36.751 GiB/s 36.900 GiB/s]
+                 change:
+                        time:   [-1.8995% -0.0132% +1.6418%] (p = 0.99 > 0.05)
+                        thrpt:  [-1.6152% +0.0132% +1.9363%]
+                        No change in performance detected.
+Found 4 outliers among 30 measurements (13.33%)
+  2 (6.67%) low mild
+  2 (6.67%) high mild
+
+gpu_gpfifo/parse_pushbuffer_chunk/53_methods
+                        time:   [57.196 ns 58.816 ns 60.426 ns]
+                        thrpt:  [877.11 Melem/s 901.12 Melem/s 926.64 Melem/s]
+                 change:
+                        time:   [+8.4541% +12.326% +16.634%] (p = 0.00 < 0.05)
+                        thrpt:  [-14.262% -10.974% -7.7951%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+gpu_gpfifo/parse_pushbuffer_chunk/49979_methods
+                        time:   [43.962 µs 44.172 µs 44.416 µs]
+                        thrpt:  [1.1253 Gelem/s 1.1315 Gelem/s 1.1369 Gelem/s]
+                 change:
+                        time:   [-2.3154% -1.2660% -0.1938%] (p = 0.02 < 0.05)
+                        thrpt:  [+0.1942% +1.2822% +2.3703%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+
+host1x_syncpoint/increment_drain/64
+                        time:   [912.61 ns 915.98 ns 919.62 ns]
+                        thrpt:  [69.594 Melem/s 69.870 Melem/s 70.128 Melem/s]
+                 change:
+                        time:   [-11.499% -6.5289% -2.6779%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.7516% +6.9850% +12.993%]
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+host1x_syncpoint/frame_out_of_order/32
+                        time:   [949.00 ns 953.09 ns 959.46 ns]
+                        thrpt:  [33.352 Melem/s 33.575 Melem/s 33.720 Melem/s]
+                 change:
+                        time:   [-1.9390% -1.2094% -0.4189%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.4207% +1.2242% +1.9773%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+host1x_syncpoint/frame_out_of_order/128
+                        time:   [5.6734 µs 5.7043 µs 5.7401 µs]
+                        thrpt:  [22.299 Melem/s 22.439 Melem/s 22.561 Melem/s]
+                 change:
+                        time:   [-1.3938% -0.5259% +0.3910%] (p = 0.25 > 0.05)
+                        thrpt:  [-0.3895% +0.5287% +1.4135%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+interval_tree/find_overlaps/128
+                        time:   [1.5626 µs 1.5706 µs 1.5798 µs]
+                        thrpt:  [40.511 Melem/s 40.749 Melem/s 40.956 Melem/s]
+                 change:
+                        time:   [-7.3641% -4.7371% -2.5223%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.5876% +4.9727% +7.9495%]
+                        Performance has improved.
+Found 4 outliers among 30 measurements (13.33%)
+  2 (6.67%) low mild
+  2 (6.67%) high mild
+interval_tree/find_overlaps_slice/128
+                        time:   [1.4307 µs 1.4398 µs 1.4509 µs]
+                        thrpt:  [44.111 Melem/s 44.449 Melem/s 44.735 Melem/s]
+                 change:
+                        time:   [-8.7069% -4.9354% -2.4636%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.5258% +5.1917% +9.5373%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+interval_tree/find_overlaps/1024
+                        time:   [8.9251 µs 8.9829 µs 9.0442 µs]
+                        thrpt:  [7.0763 Melem/s 7.1246 Melem/s 7.1708 Melem/s]
+                 change:
+                        time:   [-1.6976% -0.9153% -0.1321%] (p = 0.03 < 0.05)
+                        thrpt:  [+0.1323% +0.9237% +1.7269%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+interval_tree/find_overlaps_slice/1024
+                        time:   [8.5433 µs 8.6073 µs 8.6830 µs]
+                        thrpt:  [7.3707 Melem/s 7.4355 Melem/s 7.4913 Melem/s]
+                 change:
+                        time:   [-1.1883% -0.5052% +0.1355%] (p = 0.16 > 0.05)
+                        thrpt:  [-0.1353% +0.5078% +1.2026%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+interval_tree/insert_shuffled/1024
+                        time:   [53.801 µs 54.229 µs 54.789 µs]
+                        thrpt:  [18.690 Melem/s 18.883 Melem/s 19.033 Melem/s]
+                 change:
+                        time:   [-3.8853% -3.0375% -2.1960%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.2453% +3.1327% +4.0424%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+ipc_parser/parse/cmif_request_128B
+                        time:   [63.125 ns 63.993 ns 64.874 ns]
+                        thrpt:  [1.8375 GiB/s 1.8629 GiB/s 1.8885 GiB/s]
+                 change:
+                        time:   [-14.665% -13.744% -12.802%] (p = 0.00 < 0.05)
+                        thrpt:  [+14.682% +15.933% +17.185%]
+                        Performance has improved.
+ipc_parser/parse/tipc_request_48B
+                        time:   [54.862 ns 55.216 ns 55.558 ns]
+                        thrpt:  [823.93 MiB/s 829.04 MiB/s 834.39 MiB/s]
+                 change:
+                        time:   [-18.732% -11.781% -6.3438%] (p = 0.00 < 0.05)
+                        thrpt:  [+6.7735% +13.354% +23.049%]
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) low mild
+  2 (6.67%) high mild
+ipc_parser/serialize_cmif/response_24B_payload
+                        time:   [8.6733 ns 8.7307 ns 8.7943 ns]
+                        thrpt:  [6.7776 GiB/s 6.8270 GiB/s 6.8722 GiB/s]
+                 change:
+                        time:   [-27.860% -19.075% -9.2724%] (p = 0.00 < 0.05)
+                        thrpt:  [+10.220% +23.570% +38.619%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+ipc_parser/serialize_tipc/response_16B_payload
+                        time:   [5.9950 ns 6.0368 ns 6.0882 ns]
+                        thrpt:  [3.6713 GiB/s 3.7026 GiB/s 3.7284 GiB/s]
+                 change:
+                        time:   [+1.3512% +2.5428% +3.7136%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.5806% -2.4797% -1.3332%]
+                        Performance has regressed.
+
+jit_regalloc/linear_scan/512_sorted
+                        time:   [5.2250 µs 5.2723 µs 5.3209 µs]
+                        thrpt:  [96.224 Melem/s 97.112 Melem/s 97.990 Melem/s]
+                 change:
+                        time:   [-4.7646% -3.2686% -1.7343%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.7649% +3.3790% +5.0029%]
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) low mild
+  2 (6.67%) high mild
+jit_regalloc/linear_scan/2048_sorted
+                        time:   [21.904 µs 21.989 µs 22.107 µs]
+                        thrpt:  [92.639 Melem/s 93.137 Melem/s 93.500 Melem/s]
+                 change:
+                        time:   [-2.2638% -1.0790% +0.1890%] (p = 0.10 > 0.05)
+                        thrpt:  [-0.1887% +1.0908% +2.3163%]
+                        No change in performance detected.
+jit_regalloc/linear_scan/512_unsorted
+                        time:   [9.9684 µs 10.088 µs 10.204 µs]
+                        thrpt:  [50.178 Melem/s 50.754 Melem/s 51.363 Melem/s]
+                 change:
+                        time:   [-15.833% -13.731% -11.721%] (p = 0.00 < 0.05)
+                        thrpt:  [+13.277% +15.916% +18.812%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+jit_regalloc/bitset_or/4096bits
+                        time:   [27.890 ns 29.888 ns 31.459 ns]
+                        thrpt:  [15.157 GiB/s 15.954 GiB/s 17.097 GiB/s]
+                 change:
+                        time:   [-25.087% -8.3232% +13.165%] (p = 0.43 > 0.05)
+                        thrpt:  [-11.633% +9.0789% +33.488%]
+                        No change in performance detected.
+
+kernel_scheduler/schedule_unschedule/96_threads
+                        time:   [362.78 ns 366.89 ns 371.74 ns]
+                        thrpt:  [258.25 Melem/s 261.66 Melem/s 264.62 Melem/s]
+                 change:
+                        time:   [-14.792% -4.3616% +2.7020%] (p = 0.63 > 0.05)
+                        thrpt:  [-2.6309% +4.5605% +17.360%]
+                        No change in performance detected.
+Found 4 outliers among 30 measurements (13.33%)
+  1 (3.33%) low mild
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+kernel_scheduler/reschedule/6_threads_same_prio
+                        time:   [5.4580 µs 5.4870 µs 5.5252 µs]
+                        thrpt:  [185.33 Melem/s 186.62 Melem/s 187.61 Melem/s]
+                 change:
+                        time:   [+1.6896% +2.6599% +3.7178%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.5845% -2.5910% -1.6615%]
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+kernel_scheduler/scheduled_element_at/walk_96_threads
+                        time:   [353.41 ns 355.02 ns 357.08 ns]
+                        thrpt:  [268.85 Melem/s 270.41 Melem/s 271.64 Melem/s]
+                 change:
+                        time:   [-1.5569% -0.7066% +0.1282%] (p = 0.12 > 0.05)
+                        thrpt:  [-0.1280% +0.7117% +1.5815%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high mild
+kernel_scheduler/transfer_to_core/32_threads_ping_pong
+                        time:   [491.91 ns 496.42 ns 500.22 ns]
+                        thrpt:  [127.94 Melem/s 128.92 Melem/s 130.11 Melem/s]
+                 change:
+                        time:   [-0.6211% +0.1316% +0.8546%] (p = 0.73 > 0.05)
+                        thrpt:  [-0.8473% -0.1315% +0.6250%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+
+kernel_sync/insert_then_wake_all/16addr_x4
+                        time:   [1.3694 µs 1.3802 µs 1.3937 µs]
+                        thrpt:  [45.921 Melem/s 46.370 Melem/s 46.736 Melem/s]
+                 change:
+                        time:   [-19.609% -12.321% -6.7705%] (p = 0.00 < 0.05)
+                        thrpt:  [+7.2621% +14.053% +24.393%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+kernel_sync/insert_then_remove/16addr_x4
+                        time:   [2.0422 µs 2.0596 µs 2.0790 µs]
+                        thrpt:  [30.784 Melem/s 31.074 Melem/s 31.339 Melem/s]
+                 change:
+                        time:   [-1.8925% -0.8269% +0.1646%] (p = 0.13 > 0.05)
+                        thrpt:  [-0.1644% +0.8338% +1.9290%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+kernel_sync/compute_signal_modify_addend/256addr_populated
+                        time:   [11.048 µs 11.114 µs 11.187 µs]
+                        thrpt:  [91.538 Melem/s 92.134 Melem/s 92.683 Melem/s]
+                 change:
+                        time:   [-0.5138% +0.3045% +1.0451%] (p = 0.47 > 0.05)
+                        thrpt:  [-1.0343% -0.3036% +0.5165%]
+                        No change in performance detected.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+
+maxwell_state/scan_changes/14KiB
+                        time:   [130.62 ns 131.84 ns 133.30 ns]
+                        thrpt:  [100.16 GiB/s 101.27 GiB/s 102.21 GiB/s]
+                 change:
+                        time:   [-0.5268% +0.5892% +1.6759%] (p = 0.32 > 0.05)
+                        thrpt:  [-1.6482% -0.5857% +0.5296%]
+                        No change in performance detected.
+maxwell_state/scan_changes_scalar/14KiB
+                        time:   [1.0858 µs 1.0881 µs 1.0903 µs]
+                        thrpt:  [12.245 GiB/s 12.270 GiB/s 12.296 GiB/s]
+                 change:
+                        time:   [-1.5998% -0.5287% +0.4617%] (p = 0.34 > 0.05)
+                        thrpt:  [-0.4596% +0.5315% +1.6258%]
+                        No change in performance detected.
+maxwell_state/set_dirty_batch/1024
+                        time:   [389.38 ns 394.08 ns 398.25 ns]
+                        thrpt:  [2.5713 Gelem/s 2.5985 Gelem/s 2.6298 Gelem/s]
+                 change:
+                        time:   [-22.400% -15.473% -8.8591%] (p = 0.00 < 0.05)
+                        thrpt:  [+9.7202% +18.306% +28.866%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+maxwell_state/pipeline_state_hash64/72
+                        time:   [15.674 ns 15.728 ns 15.789 ns]
+                        thrpt:  [4.2470 GiB/s 4.2634 GiB/s 4.2781 GiB/s]
+                 change:
+                        time:   [-3.2480% -2.1979% -1.1586%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.1722% +2.2473% +3.3570%]
+                        Performance has improved.
+maxwell_state/pipeline_state_hash64/1024
+                        time:   [197.49 ns 198.47 ns 199.42 ns]
+                        thrpt:  [4.7823 GiB/s 4.8051 GiB/s 4.8290 GiB/s]
+                 change:
+                        time:   [-2.9504% -2.2609% -1.5469%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.5712% +2.3131% +3.0401%]
+                        Performance has improved.
+
+memory_pagetable/read/random_256MiB
+                        time:   [4.3466 µs 4.3969 µs 4.4462 µs]
+                        thrpt:  [921.24 Melem/s 931.56 Melem/s 942.34 Melem/s]
+                 change:
+                        time:   [+1.1598% +2.2175% +3.2534%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.1509% -2.1694% -1.1465%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+memory_pagetable/read_mut/random_256MiB
+                        time:   [4.6932 µs 4.7477 µs 4.7941 µs]
+                        thrpt:  [854.38 Melem/s 862.73 Melem/s 872.75 Melem/s]
+                 change:
+                        time:   [-6.0377% +0.0770% +4.0083%] (p = 0.99 > 0.05)
+                        thrpt:  [-3.8539% -0.0770% +6.4256%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+memory_pagetable/read/sequential_16MiB
+                        time:   [3.2577 µs 3.2871 µs 3.3225 µs]
+                        thrpt:  [1.2328 Gelem/s 1.2461 Gelem/s 1.2573 Gelem/s]
+                 change:
+                        time:   [+0.4540% +1.5829% +2.8659%] (p = 0.01 < 0.05)
+                        thrpt:  [-2.7861% -1.5582% -0.4520%]
+                        Change within noise threshold.
+memory_pagetable/map_range/16MiB_fresh_table
+                        time:   [11.859 µs 12.571 µs 12.993 µs]
+                        thrpt:  [315.24 Melem/s 325.84 Melem/s 345.40 Melem/s]
+                 change:
+                        time:   [-29.623% -11.362% +11.618%] (p = 0.31 > 0.05)
+                        thrpt:  [-10.409% +12.818% +42.092%]
+                        No change in performance detected.
+
+memory_tracking/is_set/random_1M_bits
+                        time:   [2.5246 µs 2.5426 µs 2.5627 µs]
+                        thrpt:  [1.5983 Gelem/s 1.6110 Gelem/s 1.6224 Gelem/s]
+                 change:
+                        time:   [-1.6222% -0.8573% -0.0487%] (p = 0.04 < 0.05)
+                        thrpt:  [+0.0487% +0.8648% +1.6490%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+memory_tracking/set_range/2MiB_set_then_clear_x1024
+                        time:   [22.619 µs 22.826 µs 23.077 µs]
+                        thrpt:  [45.438 Gelem/s 45.938 Gelem/s 46.358 Gelem/s]
+                 change:
+                        time:   [-12.668% -8.4306% -4.9526%] (p = 0.00 < 0.05)
+                        thrpt:  [+5.2107% +9.2068% +14.506%]
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) low mild
+  1 (3.33%) high severe
+memory_tracking/find_next_set/scan_1pct_dirty
+                        time:   [63.283 µs 63.822 µs 64.495 µs]
+                        thrpt:  [161.66 Melem/s 163.36 Melem/s 164.75 Melem/s]
+                 change:
+                        time:   [+5.2813% +7.0448% +8.8835%] (p = 0.00 < 0.05)
+                        thrpt:  [-8.1588% -6.5812% -5.0163%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+memory_tracking/count_set_bits/1M_bits
+                        time:   [12.368 µs 12.511 µs 12.621 µs]
+                        thrpt:  [83.082 Gelem/s 83.812 Gelem/s 84.780 Gelem/s]
+                 change:
+                        time:   [-2.9099% -1.7642% -0.5826%] (p = 0.01 < 0.05)
+                        thrpt:  [+0.5860% +1.7958% +2.9971%]
+                        Change within noise threshold.
+
+motion_fusion/update/1000samples
+                        time:   [22.217 µs 22.408 µs 22.605 µs]
+                        thrpt:  [44.237 Melem/s 44.627 Melem/s 45.011 Melem/s]
+                 change:
+                        time:   [-11.982% -6.2710% -2.3572%] (p = 0.01 < 0.05)
+                        thrpt:  [+2.4141% +6.6906% +13.612%]
+                        Performance has improved.
+motion_fusion/update_and_matrix/1000samples
+                        time:   [24.154 µs 24.304 µs 24.475 µs]
+                        thrpt:  [40.859 Melem/s 41.146 Melem/s 41.401 Melem/s]
+                 change:
+                        time:   [-22.960% -13.590% -4.1495%] (p = 0.01 < 0.05)
+                        thrpt:  [+4.3291% +15.727% +29.803%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+motion_fusion/rotation_matrix_3x3
+                        time:   [2.8496 ns 2.8597 ns 2.8699 ns]
+                        thrpt:  [348.45 Melem/s 349.69 Melem/s 350.93 Melem/s]
+                 change:
+                        time:   [-2.2078% -1.3201% -0.1035%] (p = 0.01 < 0.05)
+                        thrpt:  [+0.1036% +1.3378% +2.2576%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+
+pixel_converter/r5g6b5_to_rgba8/1920x1080
+                        time:   [503.70 µs 506.08 µs 508.73 µs]
+                        thrpt:  [4.0760 Gelem/s 4.0973 Gelem/s 4.1168 Gelem/s]
+                 change:
+                        time:   [-3.5658% -2.2393% -0.9248%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.9334% +2.2906% +3.6976%]
+                        Change within noise threshold.
+pixel_converter/r4g4b4a4_to_rgba8/1920x1080
+                        time:   [408.38 µs 411.13 µs 414.20 µs]
+                        thrpt:  [5.0063 Gelem/s 5.0436 Gelem/s 5.0776 Gelem/s]
+                 change:
+                        time:   [-3.0497% -2.0342% -0.9506%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.9598% +2.0765% +3.1456%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+pixel_converter/bgra8_to_rgba8/1920x1080
+                        time:   [399.26 µs 404.59 µs 412.70 µs]
+                        thrpt:  [5.0245 Gelem/s 5.1252 Gelem/s 5.1936 Gelem/s]
+                 change:
+                        time:   [-3.6333% -0.4157% +2.9272%] (p = 0.81 > 0.05)
+                        thrpt:  [-2.8440% +0.4174% +3.7703%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high severe
+
+romfs_indexer/find_file/hit_random_10k_files
+                        time:   [160.17 µs 161.03 µs 162.05 µs]
+                        thrpt:  [6.3189 Melem/s 6.3592 Melem/s 6.3932 Melem/s]
+                 change:
+                        time:   [+0.0631% +0.9976% +1.8592%] (p = 0.03 < 0.05)
+                        thrpt:  [-1.8252% -0.9878% -0.0631%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+romfs_indexer/find_file/miss_random_10k_files
+                        time:   [73.202 µs 73.657 µs 74.228 µs]
+                        thrpt:  [13.795 Melem/s 13.902 Melem/s 13.989 Melem/s]
+                 change:
+                        time:   [-36.254% -26.418% -15.168%] (p = 0.00 < 0.05)
+                        thrpt:  [+17.881% +35.904% +56.872%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+romfs_indexer/reader_find_file/hit_random_10k_files
+                        time:   [136.59 µs 137.14 µs 137.96 µs]
+                        thrpt:  [7.4225 Melem/s 7.4667 Melem/s 7.4968 Melem/s]
+                 change:
+                        time:   [-13.901% -5.9021% +0.5791%] (p = 0.17 > 0.05)
+                        thrpt:  [-0.5757% +6.2723% +16.146%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+romfs_indexer/from_metadata_bytes/10k_files
+                        time:   [39.043 µs 39.276 µs 39.572 µs]
+                        thrpt:  [14.639 GiB/s 14.750 GiB/s 14.838 GiB/s]
+                 change:
+                        time:   [-0.2650% +0.6192% +1.5430%] (p = 0.19 > 0.05)
+                        thrpt:  [-1.5196% -0.6154% +0.2657%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+shader_cache/lz4_decompress/64KiB_from_15735B
+                        time:   [37.322 µs 37.749 µs 38.321 µs]
+                        thrpt:  [1.5927 GiB/s 1.6169 GiB/s 1.6354 GiB/s]
+                 change:
+                        time:   [+5.2145% +6.3750% +7.5205%] (p = 0.00 < 0.05)
+                        thrpt:  [-6.9944% -5.9930% -4.9561%]
+                        Performance has regressed.
+shader_cache/crc32/64KiB
+                        time:   [101.75 µs 102.58 µs 103.52 µs]
+                        thrpt:  [603.74 MiB/s 609.30 MiB/s 614.25 MiB/s]
+                 change:
+                        time:   [-16.048% -8.0661% -1.8544%] (p = 0.02 < 0.05)
+                        thrpt:  [+1.8894% +8.7738% +19.115%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+shader_cache/toc_parse/4096
+                        time:   [1.7913 µs 1.8030 µs 1.8176 µs]
+                        thrpt:  [2.2535 Gelem/s 2.2718 Gelem/s 2.2866 Gelem/s]
+                 change:
+                        time:   [-2.0047% -1.1622% -0.3406%] (p = 0.01 < 0.05)
+                        thrpt:  [+0.3417% +1.1759% +2.0457%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+shader_transpiler/transpile/4KiB
+                        time:   [1.3941 µs 1.4024 µs 1.4113 µs]
+                        thrpt:  [2.7030 GiB/s 2.7202 GiB/s 2.7364 GiB/s]
+                 change:
+                        time:   [-1.1394% -0.3737% +0.5195%] (p = 0.39 > 0.05)
+                        thrpt:  [-0.5168% +0.3751% +1.1526%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+shader_transpiler/transpile/64KiB
+                        time:   [26.787 µs 26.984 µs 27.186 µs]
+                        thrpt:  [2.2451 GiB/s 2.2619 GiB/s 2.2786 GiB/s]
+                 change:
+                        time:   [-2.4046% -1.7500% -1.0272%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.0379% +1.7812% +2.4638%]
+                        Performance has improved.
+Found 4 outliers among 30 measurements (13.33%)
+  4 (13.33%) high mild
+shader_transpiler/decode_instructions/64KiB
+                        time:   [15.457 µs 15.574 µs 15.714 µs]
+                        thrpt:  [3.8841 GiB/s 3.9189 GiB/s 3.9487 GiB/s]
+                 change:
+                        time:   [-2.7653% -2.1611% -1.5632%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.5881% +2.2088% +2.8439%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+
+storage_fs/aes_ctr_decrypt/16KiB
+                        time:   [6.3888 µs 6.4479 µs 6.5118 µs]
+                        thrpt:  [2.3432 GiB/s 2.3665 GiB/s 2.3884 GiB/s]
+                 change:
+                        time:   [+0.1377% +1.0126% +1.9727%] (p = 0.03 < 0.05)
+                        thrpt:  [-1.9346% -1.0024% -0.1375%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+storage_fs/aes_ctr_decrypt/1024KiB
+                        time:   [403.00 µs 406.35 µs 410.22 µs]
+                        thrpt:  [2.3806 GiB/s 2.4032 GiB/s 2.4232 GiB/s]
+                 change:
+                        time:   [-2.2319% -0.9795% +0.1692%] (p = 0.13 > 0.05)
+                        thrpt:  [-0.1689% +0.9892% +2.2828%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+storage_fs/lz4_decompress/64KiB
+                        time:   [9.4897 µs 9.5610 µs 9.6594 µs]
+                        thrpt:  [6.3187 GiB/s 6.3838 GiB/s 6.4317 GiB/s]
+                 change:
+                        time:   [-1.8308% -1.2899% -0.6793%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.6840% +1.3067% +1.8649%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+storage_fs/zstd_decompress/64KiB_level3
+                        time:   [6.0110 µs 6.0554 µs 6.1074 µs]
+                        thrpt:  [9.9937 GiB/s 10.079 GiB/s 10.154 GiB/s]
+                 change:
+                        time:   [-2.6294% -1.9293% -1.2390%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.2545% +1.9672% +2.7004%]
+                        Performance has improved.
+Found 4 outliers among 30 measurements (13.33%)
+  2 (6.67%) low mild
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+storage_fs/pfs0_find_file/all_64_names
+                        time:   [34.795 µs 34.975 µs 35.183 µs]
+                        thrpt:  [1.8191 Melem/s 1.8299 Melem/s 1.8393 Melem/s]
+                 change:
+                        time:   [-2.2825% -1.4447% -0.7096%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.7146% +1.4658% +2.3358%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+
+surfaceflinger_queue/frame_cycle/3_buffers_x256
+                        time:   [11.708 µs 11.778 µs 11.870 µs]
+                        thrpt:  [21.567 Melem/s 21.736 Melem/s 21.865 Melem/s]
+                 change:
+                        time:   [-4.0639% -3.2733% -2.5174%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.5824% +3.3841% +4.2360%]
+                        Performance has improved.
+surfaceflinger_queue/find_oldest_free_slot/64_free_slots
+                        time:   [46.644 ns 46.836 ns 47.056 ns]
+                        thrpt:  [1.3601 Gelem/s 1.3665 Gelem/s 1.3721 Gelem/s]
+                 change:
+                        time:   [-2.3138% -1.6288% -0.9843%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.9940% +1.6558% +2.3686%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high severe
+surfaceflinger_queue/parcel_write/queue_buffer_input
+                        time:   [9.4920 ns 9.5270 ns 9.5650 ns]
+                        thrpt:  [18.305 GiB/s 18.378 GiB/s 18.446 GiB/s]
+                 change:
+                        time:   [-4.0315% -3.4198% -2.8303%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.9128% +3.5409% +4.2009%]
+                        Performance has improved.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) low mild
+  1 (3.33%) high mild
+surfaceflinger_queue/parcel_read/interface_token_and_input
+                        time:   [43.035 ns 43.252 ns 43.554 ns]
+                        thrpt:  [4.0200 GiB/s 4.0481 GiB/s 4.0686 GiB/s]
+                 change:
+                        time:   [+1.0060% +1.8483% +2.7238%] (p = 0.00 < 0.05)
+                        thrpt:  [-2.6516% -1.8147% -0.9959%]
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high mild
+
+tegra_mme/execute_alu_seq
+                        time:   [23.525 ns 23.664 ns 23.790 ns]
+                        thrpt:  [336.28 Melem/s 338.07 Melem/s 340.07 Melem/s]
+                 change:
+                        time:   [+2.9020% +3.7322% +4.5373%] (p = 0.00 < 0.05)
+                        thrpt:  [-4.3403% -3.5979% -2.8202%]
+                        Performance has regressed.
+tegra_mme/execute_indirect_draw/10
+                        time:   [202.05 ns 203.10 ns 204.21 ns]
+                        thrpt:  [48.969 Melem/s 49.236 Melem/s 49.494 Melem/s]
+                 change:
+                        time:   [+2.3516% +3.3967% +4.3439%] (p = 0.00 < 0.05)
+                        thrpt:  [-4.1630% -3.2852% -2.2975%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+tegra_mme/execute_indirect_draw/200
+                        time:   [3.7048 µs 3.7279 µs 3.7465 µs]
+                        thrpt:  [53.384 Melem/s 53.650 Melem/s 53.983 Melem/s]
+                 change:
+                        time:   [+1.4373% +2.3560% +3.3025%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.1969% -2.3018% -1.4170%]
+                        Performance has regressed.
+tegra_mme/execute_indirect_draw/2000
+                        time:   [36.586 µs 36.803 µs 37.033 µs]
+                        thrpt:  [54.007 Melem/s 54.343 Melem/s 54.665 Melem/s]
+                 change:
+                        time:   [+1.1300% +1.8291% +2.5142%] (p = 0.00 < 0.05)
+                        thrpt:  [-2.4525% -1.7962% -1.1174%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+
+tegra_swizzle/deswizzle_seq/rgba8_1920x1080
+                        time:   [529.38 µs 536.71 µs 546.75 µs]
+                        thrpt:  [14.129 GiB/s 14.393 GiB/s 14.592 GiB/s]
+                 change:
+                        time:   [+1.3885% +2.5241% +3.8815%] (p = 0.00 < 0.05)
+                        thrpt:  [-3.7365% -2.4619% -1.3695%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+tegra_swizzle/deswizzle_par/rgba8_1920x1080
+                        time:   [167.47 µs 180.10 µs 197.23 µs]
+                        thrpt:  [39.167 GiB/s 42.893 GiB/s 46.126 GiB/s]
+                 change:
+                        time:   [-15.874% -3.4807% +8.4422%] (p = 0.65 > 0.05)
+                        thrpt:  [-7.7849% +3.6063% +18.869%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+tegra_swizzle/swizzle_seq/rgba8_1920x1080
+                        time:   [625.31 µs 636.79 µs 651.23 µs]
+                        thrpt:  [11.862 GiB/s 12.131 GiB/s 12.353 GiB/s]
+                 change:
+                        time:   [-3.7186% -2.0018% -0.2901%] (p = 0.03 < 0.05)
+                        thrpt:  [+0.2909% +2.0427% +3.8622%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+tegra_swizzle/swizzle_par/rgba8_1920x1080
+                        time:   [166.72 µs 179.67 µs 199.29 µs]
+                        thrpt:  [38.761 GiB/s 42.995 GiB/s 46.333 GiB/s]
+                 change:
+                        time:   [-11.180% -4.5050% +2.1764%] (p = 0.23 > 0.05)
+                        thrpt:  [-2.1300% +4.7175% +12.587%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+
+texture_astc/decode_seq/4x4_1920x1080
+                        time:   [65.081 ms 65.394 ms 65.737 ms]
+                        thrpt:  [120.33 MiB/s 120.96 MiB/s 121.54 MiB/s]
+                 change:
+                        time:   [-1.7148% -0.8567% -0.0738%] (p = 0.05 > 0.05)
+                        thrpt:  [+0.0738% +0.8641% +1.7447%]
+                        No change in performance detected.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+texture_astc/decode_par/4x4_1920x1080
+                        time:   [13.520 ms 13.732 ms 13.955 ms]
+                        thrpt:  [566.82 MiB/s 576.02 MiB/s 585.07 MiB/s]
+                 change:
+                        time:   [-0.2632% +3.3888% +6.6492%] (p = 0.06 > 0.05)
+                        thrpt:  [-6.2346% -3.2777% +0.2639%]
+                        No change in performance detected.
+texture_astc/decode_seq/8x8_1920x1080
+                        time:   [36.552 ms 36.667 ms 36.779 ms]
+                        thrpt:  [215.07 MiB/s 215.73 MiB/s 216.41 MiB/s]
+                 change:
+                        time:   [+0.5479% +1.3490% +2.0659%] (p = 0.00 < 0.05)
+                        thrpt:  [-2.0241% -1.3311% -0.5449%]
+                        Change within noise threshold.
+texture_astc/decode_par/8x8_1920x1080
+                        time:   [7.1860 ms 7.3562 ms 7.5927 ms]
+                        thrpt:  [1.0174 GiB/s 1.0501 GiB/s 1.0750 GiB/s]
+                 change:
+                        time:   [-8.5181% -5.4174% -2.4087%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.4682% +5.7277% +9.3112%]
+                        Performance has improved.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+texture_astc/decode_seq_void_extent/4x4_1920x1080
+                        time:   [2.5266 ms 2.5463 ms 2.5640 ms]
+                        thrpt:  [3.0128 GiB/s 3.0337 GiB/s 3.0574 GiB/s]
+                 change:
+                        time:   [-0.6636% +0.1650% +0.9930%] (p = 0.70 > 0.05)
+                        thrpt:  [-0.9832% -0.1647% +0.6681%]
+                        No change in performance detected.
+
+texture_bcn/bc1/1920x1080
+                        time:   [1.6374 ms 1.6454 ms 1.6537 ms]
+                        thrpt:  [4.6711 GiB/s 4.6947 GiB/s 4.7178 GiB/s]
+                 change:
+                        time:   [-3.7721% -2.9127% -2.0501%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.0930% +3.0001% +3.9200%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+texture_bcn/bc3/1920x1080
+                        time:   [2.2145 ms 2.2320 ms 2.2504 ms]
+                        thrpt:  [3.4326 GiB/s 3.4609 GiB/s 3.4882 GiB/s]
+                 change:
+                        time:   [-3.6384% -2.8651% -2.1052%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.1505% +2.9496% +3.7758%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+texture_bcn/bc6h_ufloat/1920x1080
+                        time:   [6.9790 ms 7.0206 ms 7.0650 ms]
+                        thrpt:  [2.1868 GiB/s 2.2006 GiB/s 2.2137 GiB/s]
+                 change:
+                        time:   [-3.0463% -2.1983% -1.3546%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.3732% +2.2477% +3.1420%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+texture_bcn/bc7/1920x1080
+                        time:   [12.722 ms 12.767 ms 12.809 ms]
+                        thrpt:  [617.54 MiB/s 619.60 MiB/s 621.78 MiB/s]
+                 change:
+                        time:   [-4.3510% -3.4507% -2.5504%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.6172% +3.5740% +4.5490%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+
+texture_matcher/view_format_compatible/4096
+                        time:   [5.4112 µs 5.4391 µs 5.4715 µs]
+                        thrpt:  [748.61 Melem/s 753.07 Melem/s 756.94 Melem/s]
+                 change:
+                        time:   [-6.2162% -5.4222% -4.6698%] (p = 0.00 < 0.05)
+                        thrpt:  [+4.8986% +5.7330% +6.6283%]
+                        Performance has improved.
+texture_matcher/view_target_compatible/4096
+                        time:   [15.988 µs 16.028 µs 16.074 µs]
+                        thrpt:  [254.83 Melem/s 255.55 Melem/s 256.20 Melem/s]
+                 change:
+                        time:   [-1.9199% -0.9065% +0.1728%] (p = 0.11 > 0.05)
+                        thrpt:  [-0.1725% +0.9148% +1.9575%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high severe
+texture_matcher/full_match_query/4096
+                        time:   [1.2731 µs 1.2806 µs 1.2889 µs]
+                        thrpt:  [3.1779 Gelem/s 3.1985 Gelem/s 3.2174 Gelem/s]
+                 change:
+                        time:   [+0.2311% +1.1779% +2.2052%] (p = 0.02 < 0.05)
+                        thrpt:  [-2.1577% -1.1642% -0.2305%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+
+video_nvdec/idct8x8_full_add/64px
+                        time:   [122.27 ns 122.95 ns 123.81 ns]
+                        thrpt:  [516.92 Melem/s 520.55 Melem/s 523.43 Melem/s]
+                 change:
+                        time:   [-0.5803% +0.3142% +1.2084%] (p = 0.49 > 0.05)
+                        thrpt:  [-1.1940% -0.3132% +0.5837%]
+                        No change in performance detected.
+Found 6 outliers among 30 measurements (20.00%)
+  2 (6.67%) low mild
+  4 (13.33%) high mild
+video_nvdec/idct32x32_full_add/1024px
+                        time:   [2.7684 µs 2.7844 µs 2.8031 µs]
+                        thrpt:  [365.31 Melem/s 367.77 Melem/s 369.89 Melem/s]
+                 change:
+                        time:   [-4.3327% -3.1126% -1.9027%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.9396% +3.2125% +4.5290%]
+                        Performance has improved.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+video_nvdec/loop_filter_frame/1920x1080_i420
+                        time:   [9.2442 ms 9.2991 ms 9.3635 ms]
+                        thrpt:  [316.80 MiB/s 318.99 MiB/s 320.88 MiB/s]
+                 change:
+                        time:   [-2.0878% -1.2894% -0.4545%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.4566% +1.3062% +2.1324%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+video_nvdec/synthetic_dc_reconstruct_frame/1920x1080_i420
+                        time:   [5.5163 ms 5.5448 ms 5.5770 ms]
+                        thrpt:  [531.88 MiB/s 534.97 MiB/s 537.74 MiB/s]
+                 change:
+                        time:   [-2.6851% -1.5857% -0.6015%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.6051% +1.6113% +2.7592%]
+                        Change within noise threshold.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+
+video_vic/blend_surface_bt709/1920x1080_rgba16
+                        time:   [3.5801 ms 3.6796 ms 3.8006 ms]
+                        thrpt:  [4.0650 GiB/s 4.1987 GiB/s 4.3154 GiB/s]
+                 change:
+                        time:   [-8.5157% -4.1640% +1.3316%] (p = 0.10 > 0.05)
+                        thrpt:  [-1.3141% +4.3450% +9.3084%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) high mild
+  2 (6.67%) high severe
+video_vic/blend_surface_passthrough/1920x1080_rgba16
+                        time:   [689.95 µs 705.75 µs 723.33 µs]
+                        thrpt:  [21.359 GiB/s 21.891 GiB/s 22.392 GiB/s]
+                 change:
+                        time:   [-10.316% -6.0967% -2.4731%] (p = 0.00 < 0.05)
+                        thrpt:  [+2.5358% +6.4926% +11.503%]
+                        Performance has improved.
+video_vic/deinterlace_motion_adaptive/1920x1080_luma
+                        time:   [205.89 µs 206.59 µs 207.23 µs]
+                        thrpt:  [9.3193 GiB/s 9.3481 GiB/s 9.3795 GiB/s]
+                 change:
+                        time:   [-2.1413% -1.6312% -1.1772%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.1912% +1.6582% +2.1881%]
+                        Performance has improved.
+video_vic/deinterlace_bob/1920x1080_luma
+                        time:   [22.002 µs 22.063 µs 22.127 µs]
+                        thrpt:  [87.278 GiB/s 87.532 GiB/s 87.772 GiB/s]
+                 change:
+                        time:   [-1.8698% -1.1489% -0.5349%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.5378% +1.1622% +1.9055%]
+                        Change within noise threshold.
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+
+vulkan_descriptors/update_buffer/90
+                        time:   [118.56 ns 118.96 ns 119.44 ns]
+                        thrpt:  [753.52 Melem/s 756.56 Melem/s 759.10 Melem/s]
+                 change:
+                        time:   [-1.2374% -0.3876% +0.3964%] (p = 0.37 > 0.05)
+                        thrpt:  [-0.3948% +0.3892% +1.2529%]
+                        No change in performance detected.
+vulkan_descriptors/update_filter_buffers_per_draw/100
+                        time:   [803.36 ns 806.88 ns 810.61 ns]
+                        thrpt:  [123.36 Melem/s 123.93 Melem/s 124.48 Melem/s]
+                 change:
+                        time:   [-3.2044% -1.9573% -0.6711%] (p = 0.01 < 0.05)
+                        thrpt:  [+0.6757% +1.9963% +3.3105%]
+                        Change within noise threshold.
+vulkan_descriptors/update_filter_images_per_draw/100
+                        time:   [4.4705 µs 4.4999 µs 4.5292 µs]
+                        thrpt:  [22.079 Melem/s 22.223 Melem/s 22.369 Melem/s]
+                 change:
+                        time:   [+2.9648% +3.8215% +4.7056%] (p = 0.00 < 0.05)
+                        thrpt:  [-4.4941% -3.6809% -2.8794%]
+                        Performance has regressed.
+Found 4 outliers among 30 measurements (13.33%)
+  1 (3.33%) low mild
+  3 (10.00%) high mild
+vulkan_descriptors/pack_template_buffer_slice/18
+                        time:   [4.2029 ns 4.2154 ns 4.2311 ns]
+                        thrpt:  [95.088 GiB/s 95.444 GiB/s 95.728 GiB/s]
+                 change:
+                        time:   [+29.131% +30.078% +30.994%] (p = 0.00 < 0.05)
+                        thrpt:  [-23.660% -23.123% -22.559%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high mild
+

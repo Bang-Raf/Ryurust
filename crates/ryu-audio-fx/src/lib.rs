@@ -1,4 +1,4 @@
-//! High-throughput SIMD audio DSP effects engine (Biquad IIR, Delay, Reverb) for Ryubing.
+//! Biquad IIR filter effects (single, double and multi-stage) for the Ryubing audio renderer.
 
 pub mod biquad;
 pub mod ffi;

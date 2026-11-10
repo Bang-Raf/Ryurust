@@ -3,7 +3,7 @@
 //! The crate does not decode real VP9 bitstreams. What exists is: the VP9 inverse
 //! transforms (IDCT/IADST + add-to-prediction), the VP9 8-tap deblocking loop filter, and a
 //! synthetic `Vp9DecoderPipeline::decode_frame` that reads one bool-coded skip/has-coeff
-//! flag and an 8-bit DC value per 16x16 block, applies DC-only 8x8 IDCTs, then runs the
+//! flag and 8-bit Y, U and V DC values per 16x16 block, applies DC-only 8x8 IDCTs, then runs the
 //! loop filter. Benchmarks are named after those operations:
 //! full 8x8 and 32x32 IDCT-add, loop filter over a 1080p I420 frame, and the synthetic
 //! DC-only reconstruction of a 1080p frame.

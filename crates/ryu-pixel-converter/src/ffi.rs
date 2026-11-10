@@ -148,6 +148,7 @@ pub unsafe extern "C" fn ryu_pixel_convert_bgra8_to_rgba8(
     let dst = std::slice::from_raw_parts_mut(dst_ptr, dst_len);
     match convert_bgra8_to_rgba8(src, dst) {
         Ok(()) => RYU_PIXEL_SUCCESS,
+        Err(ERR_LENGTH_NOT_PIXEL_MULTIPLE) => RYU_PIXEL_ERR_INVALID_PARAM,
         Err(_) => RYU_PIXEL_ERR_BUFFER_TOO_SMALL,
     }
 }

@@ -13,6 +13,55 @@ pub fn images_equal(a: &RyuDescriptorImageInfo, b: &RyuDescriptorImageInfo) -> b
         == 0
 }
 
+/// Walks the dirty bitmask, emitting bindings that differ from the committed
+/// state. Only bits that were handled (emitted, or found redundant) are cleared;
+/// when the output is full, the remaining dirty bits are left set so the next
+/// call picks them up.
+#[inline]
+fn filter_dirty<T: Copy>(
+    current: &[T],
+    committed: &mut [T],
+    dirty: &mut [u64],
+    max_bindings: usize,
+    out_indices: &mut [u32],
+    out_infos: &mut [T],
+    equal: fn(&T, &T) -> bool,
+) -> usize {
+    let mut count = 0;
+    let limit = out_indices.len().min(out_infos.len());
+
+    for (word_idx, mask_ref) in dirty.iter_mut().enumerate() {
+        let mut mask = *mask_ref;
+        while mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            let index = word_idx * 64 + bit;
+            if index >= max_bindings {
+                // Bits past the binding count are never valid; drop them.
+                mask = 0;
+                break;
+            }
+
+            let cur = current[index];
+            if !equal(&cur, &committed[index]) {
+                if count == limit {
+                    // Output full: keep this and all later bits dirty.
+                    *mask_ref = mask;
+                    return count;
+                }
+                out_indices[count] = index as u32;
+                out_infos[count] = cur;
+                committed[index] = cur;
+                count += 1;
+            }
+
+            mask &= mask - 1;
+        }
+        *mask_ref = mask;
+    }
+
+    count
+}
+
 #[derive(Debug, Clone)]
 pub struct RyuDescriptorState {
     pub uniform_buffers: [RyuDescriptorBufferInfo; MAX_UNIFORM_BUFFER_BINDINGS],
@@ -201,34 +250,15 @@ impl RyuDescriptorState {
             _ => return 0,
         };
 
-        let mut count = 0;
-        let limit = out_indices.len().min(out_infos.len());
-
-        for (word_idx, mask_ref) in dirty.iter_mut().enumerate() {
-            let mut mask = *mask_ref;
-            while mask != 0 && count < limit {
-                let bit = mask.trailing_zeros() as usize;
-                let index = word_idx * 64 + bit;
-                if index >= max_bindings {
-                    break;
-                }
-
-                let cur = &current[index];
-                let com = &committed[index];
-
-                if !buffers_equal(cur, com) {
-                    out_indices[count] = index as u32;
-                    out_infos[count] = *cur;
-                    committed[index] = *cur;
-                    count += 1;
-                }
-
-                mask &= !(1u64 << bit);
-            }
-            *mask_ref = 0;
-        }
-
-        count
+        filter_dirty(
+            current,
+            committed,
+            dirty,
+            max_bindings,
+            out_indices,
+            out_infos,
+            buffers_equal,
+        )
     }
 
     pub fn filter_redundant_images(
@@ -253,34 +283,15 @@ impl RyuDescriptorState {
             _ => return 0,
         };
 
-        let mut count = 0;
-        let limit = out_indices.len().min(out_infos.len());
-
-        for (word_idx, mask_ref) in dirty.iter_mut().enumerate() {
-            let mut mask = *mask_ref;
-            while mask != 0 && count < limit {
-                let bit = mask.trailing_zeros() as usize;
-                let index = word_idx * 64 + bit;
-                if index >= max_bindings {
-                    break;
-                }
-
-                let cur = &current[index];
-                let com = &committed[index];
-
-                if !images_equal(cur, com) {
-                    out_indices[count] = index as u32;
-                    out_infos[count] = *cur;
-                    committed[index] = *cur;
-                    count += 1;
-                }
-
-                mask &= !(1u64 << bit);
-            }
-            *mask_ref = 0;
-        }
-
-        count
+        filter_dirty(
+            current,
+            committed,
+            dirty,
+            max_bindings,
+            out_indices,
+            out_infos,
+            images_equal,
+        )
     }
 
     /// Direct zero-copy copy of contiguous buffer descriptor slice into a destination byte buffer (e.g., template writer memory).

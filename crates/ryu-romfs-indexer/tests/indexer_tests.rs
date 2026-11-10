@@ -98,3 +98,42 @@ fn test_c_abi_lifecycle() {
 
     ryu_romfs_destroy(handle);
 }
+
+/// Known values from the LibHac formula (`hash = 123456789 ^ parent; hash = c ^ rotr(hash, 5)`),
+/// computed independently.
+#[test]
+fn test_romfs_hash_known_values() {
+    assert_eq!(ROMFS_HASH_SEED, 123_456_789);
+    assert_eq!(romfs_hash(0, b""), 123_456_789);
+    assert_eq!(romfs_hash(0, b"a"), 2_822_430_217);
+    assert_eq!(romfs_hash(0, b"data"), 0x0459_5017);
+    assert_eq!(romfs_hash(0x18, b"sound.bin"), 0xABB2_4C6A);
+    assert_eq!(ryu_romfs_hash(7, std::ptr::null(), 0), 7 ^ 123_456_789);
+    assert_eq!(
+        ryu_romfs_hash(0x18, b"sound.bin".as_ptr(), 9),
+        romfs_hash(0x18, b"sound.bin")
+    );
+}
+
+#[test]
+fn test_ryu_romfs_cached_lookups() {
+    let mut builder = MockRomFsBuilder::new();
+    let d = builder.add_dir(0, "Model");
+    builder.add_file(d, "Link.bfres", 0x1000, 500);
+    builder.add_file(0, "root.bin", 0x2000, 10);
+    let romfs = RyuRomFs::from_metadata_bytes(&builder.build_metadata()).unwrap();
+
+    for _ in 0..3 {
+        assert_eq!(romfs.find_file("/Model/Link.bfres").unwrap().size, 500);
+        assert_eq!(romfs.find_file("root.bin").unwrap().size, 10);
+        assert!(romfs.find_file("Model/missing").is_none());
+    }
+    assert_eq!(
+        romfs.reader().find_dir("Model"),
+        romfs.reader().find_dir("/Model/")
+    );
+    assert_eq!(
+        romfs.header().data_offset,
+        romfs.reader().header.data_offset
+    );
+}

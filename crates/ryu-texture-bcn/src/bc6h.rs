@@ -1,6 +1,6 @@
 //! BC6H HDR texture decompression (RGBA16F).
 
-use crate::block::{Block, RgbaColor32};
+use crate::block::{store_tile, Block, RgbaColor32};
 use crate::tables::{FIXUP_INDICES, PARTITION_TABLE};
 
 pub const HALF_ONE: i32 = 0x3C00;
@@ -833,8 +833,6 @@ pub fn decode_bc6h_surface(
     }
 
     let mut tile = [0u64; 16];
-    let dst64: &mut [u64] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u64, width * height) };
 
     let mut src_offset = 0;
     for by in 0..blocks_y {
@@ -849,13 +847,7 @@ pub fn decode_bc6h_surface(
 
             decode_bc6h_block(block, &mut tile, signed);
 
-            for ty in 0..bh {
-                let dst_row = (y_base + ty) * width + x_base;
-                let tile_row = ty * 4;
-                for tx in 0..bw {
-                    dst64[dst_row + tx] = tile[tile_row + tx];
-                }
-            }
+            store_tile(dst, &tile, width, x_base, y_base, bw, bh);
         }
     }
     Ok(())

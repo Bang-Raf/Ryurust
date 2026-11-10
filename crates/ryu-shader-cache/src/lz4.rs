@@ -31,8 +31,12 @@ pub fn decompress_lz4_block(input: &[u8], output: &mut [u8]) -> Result<usize, Lz
             }
         }
 
-        // Copy literals
-        if in_pos + lit_len > in_len || out_pos + lit_len > out_cap {
+        // Copy literals. Running out of input is corruption; running out of output
+        // space is a too-small destination.
+        if lit_len > in_len - in_pos {
+            return Err(Lz4Error::CorruptedInput);
+        }
+        if lit_len > out_cap - out_pos {
             return Err(Lz4Error::OutputBufferTooSmall);
         }
 
@@ -72,17 +76,37 @@ pub fn decompress_lz4_block(input: &[u8], output: &mut [u8]) -> Result<usize, Lz
         }
         match_len += 4; // Min match length is 4
 
-        if out_pos + match_len > out_cap {
+        if match_len > out_cap - out_pos {
             return Err(Lz4Error::OutputBufferTooSmall);
         }
 
-        // Copy matching bytes (may overlap)
-        let match_src = out_pos - offset;
-        for i in 0..match_len {
-            output[out_pos + i] = output[match_src + i];
-        }
+        copy_match(output, out_pos, offset, match_len);
         out_pos += match_len;
     }
 
     Ok(out_pos)
+}
+
+/// Copies an LZ4 match of `len` bytes starting `offset` bytes back from `out_pos`.
+///
+/// Equivalent to the byte-by-byte `output[out_pos + i] = output[out_pos - offset + i]`
+/// even when the regions overlap (`offset < len`): the match then repeats the last
+/// `offset` bytes, so it is copied in `offset`-sized chunks whose source is always
+/// fully written before it is read.
+#[inline(always)]
+fn copy_match(output: &mut [u8], out_pos: usize, offset: usize, len: usize) {
+    let src = out_pos - offset;
+    if offset >= len {
+        output.copy_within(src..src + len, out_pos);
+    } else if offset == 1 {
+        let b = output[src];
+        output[out_pos..out_pos + len].fill(b);
+    } else {
+        let mut copied = 0;
+        while copied < len {
+            let n = offset.min(len - copied);
+            output.copy_within(src + copied..src + copied + n, out_pos + copied);
+            copied += n;
+        }
+    }
 }

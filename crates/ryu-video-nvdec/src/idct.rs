@@ -786,7 +786,7 @@ pub fn idct32(input: &[i32], output: &mut [i32]) {
     // stage 7
     step1[0] = wrap_low((step2[0] as i64) + (step2[15] as i64)) as i16;
     step1[1] = wrap_low((step2[1] as i64) + (step2[14] as i64)) as i16;
-    step1[2] = wrap_low((step2[1] as i64) + (step2[13] as i64)) as i16;
+    step1[2] = wrap_low((step2[2] as i64) + (step2[13] as i64)) as i16;
     step1[3] = wrap_low((step2[3] as i64) + (step2[12] as i64)) as i16;
     step1[4] = wrap_low((step2[4] as i64) + (step2[11] as i64)) as i16;
     step1[5] = wrap_low((step2[5] as i64) + (step2[10] as i64)) as i16;
@@ -1135,6 +1135,12 @@ pub fn idct32x32_1_add(input: &[i32], dest: &mut [u8], stride: usize) {
     }
 }
 
+/// True when every coefficient of `row` is exactly zero (as `i32`).
+#[inline(always)]
+pub fn row_is_zero(row: &[i32]) -> bool {
+    row.iter().fold(0i32, |acc, &c| acc | c) == 0
+}
+
 pub fn idct32x32_1024_add(input: &[i32], dest: &mut [u8], stride: usize) {
     let mut intermediate = [0i32; 1024];
     let mut temp_in = [0i32; 32];
@@ -1142,12 +1148,10 @@ pub fn idct32x32_1024_add(input: &[i32], dest: &mut [u8], stride: usize) {
 
     // Rows
     for i in 0..32 {
-        let mut zero_coeff = 0i16;
-        for j in 0..32 {
-            zero_coeff |= input[i * 32 + j] as i16;
-        }
-
-        if zero_coeff != 0 {
+        // Test the full 32-bit coefficients: truncating to i16 first would treat any
+        // multiple of 65536 as zero and skip a non-zero row.
+        let row = &input[i * 32..(i + 1) * 32];
+        if !row_is_zero(row) {
             idct32(
                 &input[i * 32..(i + 1) * 32],
                 &mut intermediate[i * 32..(i + 1) * 32],

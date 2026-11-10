@@ -241,3 +241,42 @@ fn test_step2_concurrent_sharded_arbitration() {
         h.join().unwrap();
     }
 }
+
+#[test]
+fn test_wake_never_drops_unreported_waiters() {
+    let reg = ArbiterRegistry::new();
+    let addr = 0xDEAD_0000;
+    for t in 0..10u64 {
+        reg.insert_waiter(addr, t, t as i32);
+    }
+
+    // count = -1 (all) but only room for 3: exactly 3 removed and reported.
+    let mut out = [0u64; 3];
+    assert_eq!(reg.wake_waiters(addr, -1, &mut out), 3);
+    assert_eq!(out, [0, 1, 2]);
+    assert_eq!(reg.get_waiter_count(addr), 7);
+
+    // count = 5 with room for 2: 2 woken.
+    let mut out = [0u64; 2];
+    assert_eq!(reg.wake_waiters(addr, 5, &mut out), 2);
+    assert_eq!(out, [3, 4]);
+    assert_eq!(reg.get_waiter_count(addr), 5);
+
+    // Empty output buffer wakes nobody.
+    assert_eq!(reg.wake_waiters(addr, 0, &mut []), 0);
+    assert_eq!(reg.get_waiter_count(addr), 5);
+
+    // count = 2 with plenty of room: count limits it.
+    let mut out = [0u64; 8];
+    assert_eq!(reg.wake_waiters(addr, 2, &mut out), 2);
+    assert_eq!(&out[..2], &[5, 6]);
+
+    // Drain the rest via FFI with count = -1.
+    let mut out = [0u64; 8];
+    let ffi_reg = &reg as *const ArbiterRegistry as *mut ArbiterRegistry;
+    // SAFETY: `ffi_reg` points to a live registry; `out` has 8 writable slots.
+    let n = unsafe { ryu_arbiter_wake_waiters(ffi_reg, addr, -1, out.as_mut_ptr(), out.len()) };
+    assert_eq!(n, 3);
+    assert_eq!(&out[..3], &[7, 8, 9]);
+    assert_eq!(reg.get_waiter_count(addr), 0);
+}

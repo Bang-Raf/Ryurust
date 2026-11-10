@@ -1,6 +1,7 @@
 //! BC3 (DXT5) texture decompression: 8-bit interpolated alpha + BC1 RGB.
 
 use crate::bc1::{bc23_lerp_rgb2, bc23_lerp_rgb3, convert_rgb565_to_rgb888};
+use crate::block::store_tile;
 
 #[inline(always)]
 pub fn bcn_lerp_alpha_unorm(a0: u8, a1: u8, pal: &mut [u8; 8]) {
@@ -80,8 +81,6 @@ pub fn decode_bc3_surface(
     }
 
     let mut tile = [0u32; 16];
-    let dst32: &mut [u32] =
-        unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut u32, width * height) };
 
     let mut src_offset = 0;
     for by in 0..blocks_y {
@@ -96,13 +95,7 @@ pub fn decode_bc3_surface(
 
             decode_bc3_block(block_bytes, &mut tile);
 
-            for ty in 0..bh {
-                let dst_row = (y_base + ty) * width + x_base;
-                let tile_row = ty * 4;
-                for tx in 0..bw {
-                    dst32[dst_row + tx] = tile[tile_row + tx];
-                }
-            }
+            store_tile(dst, &tile, width, x_base, y_base, bw, bh);
         }
     }
     Ok(())

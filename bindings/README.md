@@ -40,3 +40,10 @@ are defined but not called yet. That a wrapper is called does not mean it runs
 on every frame; that depends on the call site and on `IsAvailable`.
 
 The other 19 crates have a C ABI (`ffi` module) but no C# wrapper.
+
+### Behavior changes
+
+The pre-release bug fixes kept every exported signature, but some return
+values changed (for example, the SurfaceFlinger queue now rejects invalid state
+transitions, and the audio mixer's rounding now matches C# exactly). The list
+is in [`docs/KNOWN_ISSUES.md`](../docs/KNOWN_ISSUES.md#behavior-changes-visible-to-c).

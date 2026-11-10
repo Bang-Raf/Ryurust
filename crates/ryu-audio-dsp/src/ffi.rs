@@ -1,10 +1,11 @@
 use crate::batch::{process_command_batch, DspCommandEntry};
 use crate::dsp;
 use crate::filter::{
-    process_biquad_filter_and_mix_df1, process_biquad_filter_and_mix_ramp_df1,
-    process_biquad_filter_df2, process_double_biquad_filter_and_mix,
-    process_double_biquad_filter_and_mix_ramp, process_multi_tap_biquad_filter,
-    BiquadFilterParameter, BiquadFilterState,
+    process_biquad_filter_and_mix_df1, process_biquad_filter_and_mix_df1_in_place,
+    process_biquad_filter_and_mix_ramp_df1, process_biquad_filter_and_mix_ramp_df1_in_place,
+    process_biquad_filter_df2, process_biquad_filter_df2_in_place,
+    process_double_biquad_filter_and_mix, process_double_biquad_filter_and_mix_ramp,
+    process_multi_tap_biquad_filter, BiquadFilterParameter, BiquadFilterState,
 };
 use std::slice;
 
@@ -12,6 +13,10 @@ pub const DSP_STATUS_OK: i32 = 0;
 pub const DSP_STATUS_NULL_POINTER: i32 = -1;
 pub const DSP_STATUS_INVALID_ARGUMENT: i32 = -2;
 pub const DSP_STATUS_OUT_OF_BOUNDS: i32 = -3;
+
+// Aliasing contract for the `output` / `input` pairs below: the two ranges must either be
+// disjoint or start at the same address (in-place processing, which is handled with a single
+// `&mut [f32]`). Partially overlapping ranges are not supported.
 
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_clear_buffer(buffer: *mut f32, count: usize) -> i32 {
@@ -53,7 +58,9 @@ pub unsafe extern "C" fn ryu_dsp_copy_buffer(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    std::ptr::copy_nonoverlapping(input, output, n);
+    // SAFETY: caller guarantees `n` valid floats behind each pointer; `ptr::copy` (memmove)
+    // is used because `output == input` is allowed.
+    std::ptr::copy(input, output, n);
     DSP_STATUS_OK
 }
 
@@ -72,9 +79,18 @@ pub unsafe extern "C" fn ryu_dsp_mix(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    dsp::mix(dst, src, volume);
+    if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        dsp::mix_in_place(buf, volume);
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        dsp::mix(dst, src, volume);
+    }
     DSP_STATUS_OK
 }
 
@@ -98,9 +114,18 @@ pub unsafe extern "C" fn ryu_dsp_mix_ramp(
         }
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    let last = dsp::mix_ramp(dst, src, volume0, volume1);
+    let last = if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        dsp::mix_ramp_in_place(buf, volume0, volume1)
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        dsp::mix_ramp(dst, src, volume0, volume1)
+    };
     if !last_sample_out.is_null() {
         *last_sample_out = last;
     }
@@ -122,9 +147,18 @@ pub unsafe extern "C" fn ryu_dsp_volume(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    dsp::volume(dst, src, volume);
+    if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        dsp::volume_in_place(buf, volume);
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        dsp::volume(dst, src, volume);
+    }
     DSP_STATUS_OK
 }
 
@@ -144,9 +178,18 @@ pub unsafe extern "C" fn ryu_dsp_volume_ramp(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    dsp::volume_ramp(dst, src, volume0, volume1);
+    if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        dsp::volume_ramp_in_place(buf, volume0, volume1);
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        dsp::volume_ramp(dst, src, volume0, volume1);
+    }
     DSP_STATUS_OK
 }
 
@@ -166,9 +209,18 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    process_biquad_filter_df2(&*param, &mut *state, dst, src);
+    if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        process_biquad_filter_df2_in_place(&*param, &mut *state, buf);
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        process_biquad_filter_df2(&*param, &mut *state, dst, src);
+    }
     DSP_STATUS_OK
 }
 
@@ -189,9 +241,18 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix(
     if n == 0 {
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    process_biquad_filter_and_mix_df1(&*param, &mut *state, dst, src, volume);
+    if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        process_biquad_filter_and_mix_df1_in_place(&*param, &mut *state, buf, volume);
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        process_biquad_filter_and_mix_df1(&*param, &mut *state, dst, src, volume);
+    }
     DSP_STATUS_OK
 }
 
@@ -217,10 +278,18 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix_ramp(
         }
         return DSP_STATUS_OK;
     }
-    let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
-    let last =
-        process_biquad_filter_and_mix_ramp_df1(&*param, &mut *state, dst, src, volume0, volume1);
+    let last = if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid, writable floats at `output`; input aliases it
+        // exactly, so only one (mutable) slice is created.
+        let buf = slice::from_raw_parts_mut(output, n);
+        process_biquad_filter_and_mix_ramp_df1_in_place(&*param, &mut *state, buf, volume0, volume1)
+    } else {
+        // SAFETY: caller guarantees `n` valid floats behind each pointer and that the two
+        // ranges are disjoint when the pointers differ.
+        let dst = slice::from_raw_parts_mut(output, n);
+        let src = slice::from_raw_parts(input, n);
+        process_biquad_filter_and_mix_ramp_df1(&*param, &mut *state, dst, src, volume0, volume1)
+    };
     if !last_sample_out.is_null() {
         *last_sample_out = last;
     }
@@ -252,8 +321,20 @@ pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix(
     if n == 0 {
         return DSP_STATUS_OK;
     }
+    // In-place calls (`output == input`) take a copy of the input first so that no `&[f32]`
+    // aliases the `&mut [f32]`; these cascades are rare enough that the copy is acceptable.
+    let input_copy;
+    let src: &[f32] = if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid floats at `input`; the shared slice is dropped
+        // (copied out) before the mutable slice over the same memory is created.
+        input_copy = slice::from_raw_parts(input, n).to_vec();
+        &input_copy
+    } else {
+        // SAFETY: caller guarantees `n` valid floats at `input`, disjoint from `output`.
+        slice::from_raw_parts(input, n)
+    };
+    // SAFETY: caller guarantees `n` valid, writable floats at `output`.
     let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
     process_double_biquad_filter_and_mix(
         &*param0,
         &*param1,
@@ -296,8 +377,20 @@ pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix_ramp(
         }
         return DSP_STATUS_OK;
     }
+    // In-place calls (`output == input`) take a copy of the input first so that no `&[f32]`
+    // aliases the `&mut [f32]`; these cascades are rare enough that the copy is acceptable.
+    let input_copy;
+    let src: &[f32] = if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid floats at `input`; the shared slice is dropped
+        // (copied out) before the mutable slice over the same memory is created.
+        input_copy = slice::from_raw_parts(input, n).to_vec();
+        &input_copy
+    } else {
+        // SAFETY: caller guarantees `n` valid floats at `input`, disjoint from `output`.
+        slice::from_raw_parts(input, n)
+    };
+    // SAFETY: caller guarantees `n` valid, writable floats at `output`.
     let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
     let last = process_double_biquad_filter_and_mix_ramp(
         &*param0,
         &*param1,
@@ -334,8 +427,20 @@ pub unsafe extern "C" fn ryu_dsp_multi_tap_biquad_filter(
     if n == 0 {
         return DSP_STATUS_OK;
     }
+    // In-place calls (`output == input`) take a copy of the input first so that no `&[f32]`
+    // aliases the `&mut [f32]`; these cascades are rare enough that the copy is acceptable.
+    let input_copy;
+    let src: &[f32] = if std::ptr::eq(output.cast_const(), input) {
+        // SAFETY: caller guarantees `n` valid floats at `input`; the shared slice is dropped
+        // (copied out) before the mutable slice over the same memory is created.
+        input_copy = slice::from_raw_parts(input, n).to_vec();
+        &input_copy
+    } else {
+        // SAFETY: caller guarantees `n` valid floats at `input`, disjoint from `output`.
+        slice::from_raw_parts(input, n)
+    };
+    // SAFETY: caller guarantees `n` valid, writable floats at `output`.
     let dst = slice::from_raw_parts_mut(output, n);
-    let src = slice::from_raw_parts(input, n);
     let p_slice = slice::from_raw_parts(params, stage_count);
     let s_slice = slice::from_raw_parts_mut(states, stage_count);
     process_multi_tap_biquad_filter(p_slice, s_slice, dst, src);
