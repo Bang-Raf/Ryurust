@@ -1,0 +1,18 @@
+[package]
+name = "ryu-interval-tree"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Sorted-array interval set for texture and buffer cache overlap queries"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

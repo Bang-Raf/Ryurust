@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.so
+*.dll
+*.dylib
+.vscode/
+.idea/
+*.nca
+*.nsp
+*.xci
+prod.keys
+title.keys

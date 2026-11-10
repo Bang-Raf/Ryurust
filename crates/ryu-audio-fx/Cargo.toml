@@ -1,0 +1,16 @@
+[package]
+name = "ryu-audio-fx"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "Biquad filter audio effects for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

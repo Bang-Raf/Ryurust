@@ -1,0 +1,178 @@
+[package]
+name = "ryurust-bench"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Criterion benchmark suite for every Ryurust crate"
+[lib]
+path = "lib.rs"
+bench = false
+
+[dependencies]
+ryu-audio-dsp = { path = "../crates/ryu-audio-dsp" }
+ryu-audio-fx = { path = "../crates/ryu-audio-fx" }
+ryu-audio-mixer = { path = "../crates/ryu-audio-mixer" }
+ryu-audio-resampler = { path = "../crates/ryu-audio-resampler" }
+ryu-buffer-diff = { path = "../crates/ryu-buffer-diff" }
+ryu-common-hash = { path = "../crates/ryu-common-hash" }
+ryu-gal-queue = { path = "../crates/ryu-gal-queue" }
+ryu-gpu-gpfifo = { path = "../crates/ryu-gpu-gpfifo" }
+ryu-host1x-syncpoint = { path = "../crates/ryu-host1x-syncpoint" }
+ryu-interval-tree = { path = "../crates/ryu-interval-tree" }
+ryu-ipc-parser = { path = "../crates/ryu-ipc-parser" }
+ryu-jit-regalloc = { path = "../crates/ryu-jit-regalloc" }
+ryu-kernel-scheduler = { path = "../crates/ryu-kernel-scheduler" }
+ryu-kernel-sync = { path = "../crates/ryu-kernel-sync" }
+ryu-maxwell-state = { path = "../crates/ryu-maxwell-state" }
+ryu-memory-pagetable = { path = "../crates/ryu-memory-pagetable" }
+ryu-memory-tracking = { path = "../crates/ryu-memory-tracking" }
+ryu-motion-fusion = { path = "../crates/ryu-motion-fusion" }
+ryu-pixel-converter = { path = "../crates/ryu-pixel-converter" }
+ryu-romfs-indexer = { path = "../crates/ryu-romfs-indexer" }
+ryu-shader-cache = { path = "../crates/ryu-shader-cache" }
+ryu-shader-transpiler = { path = "../crates/ryu-shader-transpiler" }
+ryu-storage-fs = { path = "../crates/ryu-storage-fs" }
+ryu-surfaceflinger-queue = { path = "../crates/ryu-surfaceflinger-queue" }
+ryu-tegra-mme = { path = "../crates/ryu-tegra-mme" }
+ryu-tegra-swizzle = { path = "../crates/ryu-tegra-swizzle" }
+ryu-texture-astc = { path = "../crates/ryu-texture-astc" }
+ryu-texture-bcn = { path = "../crates/ryu-texture-bcn" }
+ryu-texture-matcher = { path = "../crates/ryu-texture-matcher" }
+ryu-video-nvdec = { path = "../crates/ryu-video-nvdec" }
+ryu-video-vic = { path = "../crates/ryu-video-vic" }
+ryu-vulkan-descriptors = { path = "../crates/ryu-vulkan-descriptors" }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "audio_dsp"
+harness = false
+
+[[bench]]
+name = "audio_fx"
+harness = false
+
+[[bench]]
+name = "audio_mixer"
+harness = false
+
+[[bench]]
+name = "audio_resampler"
+harness = false
+
+[[bench]]
+name = "buffer_diff"
+harness = false
+
+[[bench]]
+name = "common_hash"
+harness = false
+
+[[bench]]
+name = "gal_queue"
+harness = false
+
+[[bench]]
+name = "gpu_gpfifo"
+harness = false
+
+[[bench]]
+name = "host1x_syncpoint"
+harness = false
+
+[[bench]]
+name = "interval_tree"
+harness = false
+
+[[bench]]
+name = "ipc_parser"
+harness = false
+
+[[bench]]
+name = "jit_regalloc"
+harness = false
+
+[[bench]]
+name = "kernel_scheduler"
+harness = false
+
+[[bench]]
+name = "kernel_sync"
+harness = false
+
+[[bench]]
+name = "maxwell_state"
+harness = false
+
+[[bench]]
+name = "memory_pagetable"
+harness = false
+
+[[bench]]
+name = "memory_tracking"
+harness = false
+
+[[bench]]
+name = "motion_fusion"
+harness = false
+
+[[bench]]
+name = "pixel_converter"
+harness = false
+
+[[bench]]
+name = "romfs_indexer"
+harness = false
+
+[[bench]]
+name = "shader_cache"
+harness = false
+
+[[bench]]
+name = "shader_transpiler"
+harness = false
+
+[[bench]]
+name = "storage_fs"
+harness = false
+
+[[bench]]
+name = "surfaceflinger_queue"
+harness = false
+
+[[bench]]
+name = "tegra_mme"
+harness = false
+
+[[bench]]
+name = "tegra_swizzle"
+harness = false
+
+[[bench]]
+name = "texture_astc"
+harness = false
+
+[[bench]]
+name = "texture_bcn"
+harness = false
+
+[[bench]]
+name = "texture_matcher"
+harness = false
+
+[[bench]]
+name = "video_nvdec"
+harness = false
+
+[[bench]]
+name = "video_vic"
+harness = false
+
+[[bench]]
+name = "vulkan_descriptors"
+harness = false
+
+[lints]
+workspace = true

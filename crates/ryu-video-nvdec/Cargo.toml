@@ -1,0 +1,16 @@
+[package]
+name = "ryu-video-nvdec"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "VP9 inverse transform and loop-filter kernels (not a complete VP9 decoder)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

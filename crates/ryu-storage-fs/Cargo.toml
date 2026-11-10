@@ -1,0 +1,21 @@
+[package]
+name = "ryu-storage-fs"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "NCA AES-CTR decryption, LZ4/zstd decompression and PFS0 lookup for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std"] }
+aes = { version = "0.8.4" }
+cipher = { version = "0.4.4" }
+ctr = { version = "0.10.1" }
+zstd = { version = "0.13.3", default-features = false }
+
+[lints]
+workspace = true

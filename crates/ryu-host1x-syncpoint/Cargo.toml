@@ -1,0 +1,16 @@
+[package]
+name = "ryu-host1x-syncpoint"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "Host1x syncpoint and fence sequencing for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

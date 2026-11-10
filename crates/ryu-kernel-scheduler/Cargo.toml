@@ -1,0 +1,18 @@
+[package]
+name = "ryu-kernel-scheduler"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Horizon OS priority-bitmask thread scheduler for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

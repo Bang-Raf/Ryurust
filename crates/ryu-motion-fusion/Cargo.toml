@@ -1,0 +1,18 @@
+[package]
+name = "ryu-motion-fusion"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Mahony IMU sensor fusion for Switch motion controls"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

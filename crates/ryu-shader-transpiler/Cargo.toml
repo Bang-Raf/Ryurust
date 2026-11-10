@@ -1,0 +1,17 @@
+[package]
+name = "ryu-shader-transpiler"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Prototype Maxwell shader to SPIR-V translator (output not yet valid SPIR-V)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bumpalo = { version = "3.20.3" }
+
+[lints]
+workspace = true

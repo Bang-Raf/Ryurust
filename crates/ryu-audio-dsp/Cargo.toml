@@ -1,0 +1,19 @@
+[package]
+name = "ryu-audio-dsp"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Audio renderer command processing (mix, volume, biquad) for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[features]
+default = []
+
+[lints]
+workspace = true

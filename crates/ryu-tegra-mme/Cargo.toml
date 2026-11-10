@@ -1,0 +1,16 @@
+[package]
+name = "ryu-tegra-mme"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "Maxwell Macro Execution Engine interpreter for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

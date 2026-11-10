@@ -1,0 +1,22 @@
+[package]
+name = "ryu-common-hash"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "xxHash3-128 hashing (via twox-hash) with batching and a C ABI for Ryubing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+twox-hash = { version = "2.1.2", default-features = false, features = ["std", "xxhash3_128"] }
+rayon = { version = "1.12.0", optional = true }
+
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
+[lints]
+workspace = true

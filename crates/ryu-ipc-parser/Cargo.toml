@@ -1,0 +1,18 @@
+[package]
+name = "ryu-ipc-parser"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Horizon OS CMIF/TIPC IPC message parsing and serialization"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

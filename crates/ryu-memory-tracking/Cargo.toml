@@ -1,0 +1,16 @@
+[package]
+name = "ryu-memory-tracking"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Authors"]
+description = "Atomic page bitmap for guest memory dirty tracking"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true

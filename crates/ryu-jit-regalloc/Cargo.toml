@@ -1,0 +1,18 @@
+[package]
+name = "ryu-jit-regalloc"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+authors = ["Ryubing Contributors"]
+description = "Linear-scan register allocator and AVX2 bitset helpers for the ARMeilleure JIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true
