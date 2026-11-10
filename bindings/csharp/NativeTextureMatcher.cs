@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Ryujinx.Graphics.Gpu.Image
 {
-    public static class NativeTextureMatcher
+    internal static class NativeTextureMatcher
     {
         private const string LibraryName = "ryu_texture_matcher";
 

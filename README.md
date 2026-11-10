@@ -90,6 +90,15 @@ comparison with the C# implementation yet**, so they say nothing about
 speedup. Contributions that add a same-input C# vs Rust comparison are very
 welcome.
 
+## Download
+
+Each [GitHub release](https://github.com/Bang-Raf/Ryurust/releases) includes a
+Linux x64 build of Ryubing with the Ryurust libraries enabled
+(`ryurust-<version>-ryubing-<version>-linux_x64.tar.xz`). Extract it and run
+`./Ryujinx.sh`. You need your own legally dumped firmware, keys and games;
+none are included. How the package is built is described in
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## Quick start
 
 Requirements: Rust stable (tested with 1.99.1), x86_64 Linux.
@@ -114,6 +123,7 @@ the Ryubing executable and add the matching wrapper from
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Layout, crate conventions, SIMD and `unsafe` rules, testing, benchmarking, testing inside Ryubing |
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | All benchmark results, test machine, method, how to reproduce |
 | [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Crashes, incorrect results and unfinished crates |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | How the Ryubing + Ryurust package is built and released |
 | [`bindings/README.md`](bindings/README.md) | C# wrappers and how they load |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute and the pull-request process |
 | [`CREDITS.md`](CREDITS.md) | Upstream project, authors, dependencies |

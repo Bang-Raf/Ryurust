@@ -1,0 +1,4049 @@
+diff --git a/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs b/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
+index 94883b39b05d32385756686c09d4ba93a376748e..93dc5606d29bb48f7184ed051b035088b7eb99d0 100644
+--- a/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
++++ b/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
+@@ -446,6 +446,11 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
+ 
+         private static int GetHighestValueIndex(ReadOnlySpan<int> span)
+         {
++            if (NativeJitRegAlloc.IsAvailable && span.Length > 0)
++            {
++                return NativeJitRegAlloc.GetHighestIndex(span);
++            }
++
+             int highest = int.MinValue;
+ 
+             int selected = 0;
+diff --git a/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs b/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a355d575c34218f18edb1fd7f965356e1a764b90
+--- /dev/null
++++ b/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs
+@@ -0,0 +1,168 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace ARMeilleure.CodeGen.RegisterAllocators
++{
++    public static unsafe class NativeJitRegAlloc
++    {
++        private const string LibraryName = "ryu_jit_regalloc";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn();
++        private delegate void DestroyFn(IntPtr ctx);
++        private delegate void ResetFn(IntPtr ctx);
++        private delegate uint AddIntervalFn(IntPtr ctx, uint id, int start, int end, byte regType, byte isFixed, short fixedReg);
++        private delegate nuint RunPassFn(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount);
++        private delegate int GetResultFn(IntPtr ctx, nuint index, uint* outId, short* outReg, int* outSpill);
++        private delegate int GetHighestIndexFn(int* span, nuint len);
++        private delegate uint BitsetOrFn(ulong* dst, ulong* src, nuint count);
++        private delegate uint BitsetAndNotFn(ulong* dst, ulong* src, nuint count);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly ResetFn _reset;
++        private static readonly AddIntervalFn _addInterval;
++        private static readonly RunPassFn _runPass;
++        private static readonly GetResultFn _getResult;
++        private static readonly GetHighestIndexFn _getHighestIndex;
++        private static readonly BitsetOrFn _bitsetOr;
++        private static readonly BitsetAndNotFn _bitsetAndNot;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeJitRegAlloc()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_jit_regalloc_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_regalloc_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_regalloc_destroy");
++                    _reset = GetExport<ResetFn>(handle, "ryu_regalloc_reset");
++                    _addInterval = GetExport<AddIntervalFn>(handle, "ryu_regalloc_add_interval");
++                    _runPass = GetExport<RunPassFn>(handle, "ryu_regalloc_run_pass");
++                    _getResult = GetExport<GetResultFn>(handle, "ryu_regalloc_get_result");
++                    _getHighestIndex = GetExport<GetHighestIndexFn>(handle, "ryu_regalloc_get_highest_index");
++                    _bitsetOr = GetExport<BitsetOrFn>(handle, "ryu_regalloc_bitset_or");
++                    _bitsetAndNot = GetExport<BitsetAndNotFn>(handle, "ryu_regalloc_bitset_and_not");
++
++                    _isAvailable = _version != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr Create() => _create != null ? _create() : IntPtr.Zero;
++
++        public static void Destroy(IntPtr ctx) => _destroy?.Invoke(ctx);
++
++        public static void Reset(IntPtr ctx)
++        {
++            if (ctx != IntPtr.Zero) _reset?.Invoke(ctx);
++        }
++
++        public static uint AddInterval(IntPtr ctx, uint id, int start, int end, byte regType, bool isFixed, short fixedReg)
++        {
++            return ctx != IntPtr.Zero && _addInterval != null
++                ? _addInterval(ctx, id, start, end, regType, (byte)(isFixed ? 1 : 0), fixedReg)
++                : 0;
++        }
++
++        public static int RunPass(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount)
++        {
++            return ctx != IntPtr.Zero && _runPass != null
++                ? (int)_runPass(ctx, intAvail, vecAvail, regCount)
++                : 0;
++        }
++
++        public static bool GetResult(IntPtr ctx, int index, out uint id, out short reg, out int spillOffset)
++        {
++            id = 0; reg = -1; spillOffset = -1;
++            if (ctx == IntPtr.Zero || _getResult == null) return false;
++            fixed (uint* pId = &id)
++            fixed (short* pReg = &reg)
++            fixed (int* pSpill = &spillOffset)
++            {
++                return _getResult(ctx, (nuint)index, pId, pReg, pSpill) == 1;
++            }
++        }
++
++        public static int GetHighestIndex(ReadOnlySpan<int> span)
++        {
++            if (span.IsEmpty || _getHighestIndex == null) return 0;
++            fixed (int* p = span)
++            {
++                return _getHighestIndex(p, (nuint)span.Length);
++            }
++        }
++
++        public static bool BitsetOr(long* dst, long* src, int wordCount)
++        {
++            if (_bitsetOr != null && wordCount > 0)
++            {
++                return _bitsetOr((ulong*)dst, (ulong*)src, (nuint)wordCount) != 0;
++            }
++            return false;
++        }
++
++        public static bool BitsetAndNot(long* dst, long* src, int wordCount)
++        {
++            if (_bitsetAndNot != null && wordCount > 0)
++            {
++                return _bitsetAndNot((ulong*)dst, (ulong*)src, (nuint)wordCount) != 0;
++            }
++            return false;
++        }
++    }
++}
+diff --git a/src/ARMeilleure/Common/BitMap.cs b/src/ARMeilleure/Common/BitMap.cs
+index 52e1926992516a90cf34d597333f690ff262b29d..365bd346475e93b2851f4dafec9060c3dddda738 100644
+--- a/src/ARMeilleure/Common/BitMap.cs
++++ b/src/ARMeilleure/Common/BitMap.cs
+@@ -1,3 +1,4 @@
++using ARMeilleure.CodeGen.RegisterAllocators;
+ using System;
+ using System.Collections;
+ using System.Collections.Generic;
+@@ -85,6 +86,11 @@ namespace ARMeilleure.Common
+         {
+             EnsureCapacity(map._count * IntSize);
+ 
++            if (NativeJitRegAlloc.IsAvailable && _count >= 4)
++            {
++                return NativeJitRegAlloc.BitsetOr(_masks, map._masks, Math.Min(_count, map._count));
++            }
++
+             bool modified = false;
+ 
+             for (int index = 0; index < _count; index++)
+@@ -106,6 +112,11 @@ namespace ARMeilleure.Common
+         {
+             EnsureCapacity(map._count * IntSize);
+ 
++            if (NativeJitRegAlloc.IsAvailable && _count >= 4)
++            {
++                return NativeJitRegAlloc.BitsetAndNot(_masks, map._masks, Math.Min(_count, map._count));
++            }
++
+             bool modified = false;
+ 
+             for (int index = 0; index < _count; index++)
+diff --git a/src/ARMeilleure/Translation/Cache/JitCache.cs b/src/ARMeilleure/Translation/Cache/JitCache.cs
+index 4ab8b37ee838724a83f18be29ec64382a149f919..bce07cb39ad7a9028602b3b9b148303e903d8677 100644
+--- a/src/ARMeilleure/Translation/Cache/JitCache.cs
++++ b/src/ARMeilleure/Translation/Cache/JitCache.cs
+@@ -3,6 +3,7 @@ using ARMeilleure.CodeGen.Unwinding;
+ using ARMeilleure.Memory;
+ using ARMeilleure.Native;
+ using Humanizer;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Memory;
+ using System;
+@@ -162,6 +163,11 @@ namespace ARMeilleure.Translation.Cache
+             _cacheAllocator.AddNewBlocks(1);
+             ReservedRegion newRegion = new(_jitRegions[0].Allocator, CacheSize);
+             
++            GameplayAnomalyTracker.RecordAnomaly(
++                AnomalyCategory.JitCacheExhaustion,
++                "JitCache.Allocate",
++                $"JIT Cache of size {(_jitRegions.Count * CacheSize).Bytes()} exhausted, expanding to {((_jitRegions.Count + 1) * CacheSize).Bytes()}");
++
+             Logger.Warning?.Print(LogClass.Cpu, $"JIT Cache of size {(_jitRegions.Count * CacheSize).Bytes()} exhausted, creating new Cache Region ({((_jitRegions.Count + 1) * CacheSize).Bytes()} Total Allocation).");
+ 
+             _jitRegions.Add(newRegion);
+diff --git a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
+index 0dca27bcac5e8a3e23be02d8cbfa52da0ba6b1de..bbdd05b9e2a5e59b383f8d51116506afe1961537 100644
+--- a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
++++ b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
+@@ -115,6 +115,11 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
+         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         private void ProcessMix(Span<float> outputMix, ReadOnlySpan<float> inputMix)
+         {
++            if (NativeAudioMixer.TryMix(outputMix, inputMix, Volume))
++            {
++                return;
++            }
++
+             if (Avx.IsSupported)
+             {
+                 ProcessMixAvx(outputMix, inputMix);
+diff --git a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
+index be6aec5a66cac976b3db3e3f778327d930effcf3..16c16d6c9e0f0648ac7fef8040a1e1076bd5b2c9 100644
+--- a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
++++ b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
+@@ -49,6 +49,11 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
+         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         private float ProcessMixRamp(Span<float> outputBuffer, ReadOnlySpan<float> inputBuffer, int sampleCount)
+         {
++            if (NativeAudioMixer.TryMixRamp(outputBuffer[..sampleCount], inputBuffer[..sampleCount], Volume0, Volume1, out float lastSample))
++            {
++                return lastSample;
++            }
++
+             float ramp = (Volume1 - Volume0) / sampleCount;
+             float volume = Volume0;
+             float state = 0;
+diff --git a/src/Ryujinx.Audio/Renderer/Dsp/NativeAudioMixer.cs b/src/Ryujinx.Audio/Renderer/Dsp/NativeAudioMixer.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7585e8cfbb0c2eaee6f463f8752e6773d95cd6d3
+--- /dev/null
++++ b/src/Ryujinx.Audio/Renderer/Dsp/NativeAudioMixer.cs
+@@ -0,0 +1,131 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Audio.Renderer.Dsp
++{
++    public static unsafe class NativeAudioMixer
++    {
++        private const string LibraryName = "ryu_audio_mixer";
++
++        private delegate uint VersionFn();
++        private delegate int MixFn(float* output, float* input, nuint count, float volume);
++        private delegate int MixRampFn(float* output, float* input, nuint count, float volume0, float volume1, float* outLastSample);
++        private delegate int MixBatchFn(float* output, float** inputs, float* volumes, nuint voiceCount, nuint sampleCount);
++        private delegate int MixMatrixFn(float** outputs, nuint outputChannels, float* input, float* gains, nuint sampleCount);
++
++        private static readonly VersionFn _version;
++        private static readonly MixFn _mix;
++        private static readonly MixRampFn _mixRamp;
++        private static readonly MixBatchFn _mixBatch;
++        private static readonly MixMatrixFn _mixMatrix;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeAudioMixer()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_audio_mixer_version");
++                    _mix = GetExport<MixFn>(handle, "ryu_audio_mix");
++                    _mixRamp = GetExport<MixRampFn>(handle, "ryu_audio_mix_ramp");
++                    _mixBatch = GetExport<MixBatchFn>(handle, "ryu_audio_mix_batch");
++                    _mixMatrix = GetExport<MixMatrixFn>(handle, "ryu_audio_mix_matrix");
++
++                    _isAvailable = _version != null && _mix != null && _mixRamp != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static bool TryMix(Span<float> output, ReadOnlySpan<float> input, float volume)
++        {
++            if (!_isAvailable || output.IsEmpty || input.IsEmpty)
++            {
++                return false;
++            }
++
++            int count = Math.Min(output.Length, input.Length);
++
++            fixed (float* pOut = output)
++            fixed (float* pIn = input)
++            {
++                return _mix(pOut, pIn, (nuint)count, volume) == 0;
++            }
++        }
++
++        public static bool TryMixRamp(Span<float> output, ReadOnlySpan<float> input, float volume0, float volume1, out float lastSample)
++        {
++            lastSample = 0.0f;
++            if (!_isAvailable || output.IsEmpty || input.IsEmpty)
++            {
++                return false;
++            }
++
++            int count = Math.Min(output.Length, input.Length);
++            float last = 0.0f;
++
++            fixed (float* pOut = output)
++            fixed (float* pIn = input)
++            {
++                if (_mixRamp(pOut, pIn, (nuint)count, volume0, volume1, &last) == 0)
++                {
++                    lastSample = last;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++    }
++}
+diff --git a/src/Ryujinx.Common/Collections/NativeIntervalTree.cs b/src/Ryujinx.Common/Collections/NativeIntervalTree.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a63bac6c9e42ffb8b1e97253eed8a2444319aed
+--- /dev/null
++++ b/src/Ryujinx.Common/Collections/NativeIntervalTree.cs
+@@ -0,0 +1,158 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Common.Collections
++{
++    public sealed unsafe class NativeIntervalTree : IDisposable
++    {
++        private const string LibraryName = "ryu_interval_tree";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn();
++        private delegate void DestroyFn(IntPtr tree);
++        private delegate void ClearFn(IntPtr tree);
++        private delegate void InsertFn(IntPtr tree, ulong start, ulong end, ulong value);
++        private delegate int RemoveFn(IntPtr tree, ulong start, ulong end, ulong value);
++        private delegate nuint FindOverlapsFn(IntPtr tree, ulong start, ulong end, ulong* outBuf, nuint maxOut);
++        private delegate nuint LenFn(IntPtr tree);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly ClearFn _clear;
++        private static readonly InsertFn _insert;
++        private static readonly RemoveFn _remove;
++        private static readonly FindOverlapsFn _findOverlaps;
++        private static readonly LenFn _len;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        private IntPtr _handle;
++
++        public int Count => _handle != IntPtr.Zero && _isAvailable ? (int)_len(_handle) : 0;
++
++        static NativeIntervalTree()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_interval_tree_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_interval_tree_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_interval_tree_destroy");
++                    _clear = GetExport<ClearFn>(handle, "ryu_interval_tree_clear");
++                    _insert = GetExport<InsertFn>(handle, "ryu_interval_tree_insert");
++                    _remove = GetExport<RemoveFn>(handle, "ryu_interval_tree_remove");
++                    _findOverlaps = GetExport<FindOverlapsFn>(handle, "ryu_interval_tree_find_overlaps");
++                    _len = GetExport<LenFn>(handle, "ryu_interval_tree_len");
++
++                    _isAvailable = _version != null && _create != null && _findOverlaps != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        public NativeIntervalTree()
++        {
++            if (_isAvailable)
++            {
++                _handle = _create();
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public void Insert(ulong start, ulong end, ulong value)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                _insert(_handle, start, end, value);
++            }
++        }
++
++        public bool Remove(ulong start, ulong end, ulong value)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                return _remove(_handle, start, end, value) == 1;
++            }
++            return false;
++        }
++
++        public void Clear()
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                _clear(_handle);
++            }
++        }
++
++        public int FindOverlaps(ulong start, ulong end, Span<ulong> destination)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable && !destination.IsEmpty)
++            {
++                fixed (ulong* pDst = destination)
++                {
++                    return (int)_findOverlaps(_handle, start, end, pDst, (nuint)destination.Length);
++                }
++            }
++            return 0;
++        }
++
++        public void Dispose()
++        {
++            if (_handle != IntPtr.Zero)
++            {
++                _destroy(_handle);
++                _handle = IntPtr.Zero;
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx.Common/Diagnostics/GameplayAnomalyTracker.cs b/src/Ryujinx.Common/Diagnostics/GameplayAnomalyTracker.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d0d98127c094eab1d0850b61b7358bc361d6d6e
+--- /dev/null
++++ b/src/Ryujinx.Common/Diagnostics/GameplayAnomalyTracker.cs
+@@ -0,0 +1,138 @@
++using Ryujinx.Common.Logging;
++using System;
++using System.Collections.Concurrent;
++using System.Diagnostics;
++using System.Text;
++using System.Threading;
++
++namespace Ryujinx.Common.Diagnostics
++{
++    /// <summary>
++    /// Categorization of runtime emulation anomalies and non-fatal errors caught during gameplay.
++    /// </summary>
++    public enum AnomalyCategory
++    {
++        GpuSyncpointTimeout,
++        ShaderDivergentBarrier,
++        ProfileOverwriteAttempt,
++        UpdaterNetworkFailure,
++        JitCacheExhaustion,
++        UnhandledServiceStub,
++        FramePacingStall,
++        EmulationExceptionCaught,
++    }
++
++    /// <summary>
++    /// Diagnostic record of an individual caught runtime anomaly.
++    /// </summary>
++    public readonly struct AnomalyRecord
++    {
++        public readonly AnomalyCategory Category;
++        public readonly string Source;
++        public readonly string Detail;
++        public readonly long LatencyUs;
++        public readonly DateTime Timestamp;
++
++        public AnomalyRecord(AnomalyCategory category, string source, string detail, long latencyUs)
++        {
++            Category = category;
++            Source = source ?? string.Empty;
++            Detail = detail ?? string.Empty;
++            LatencyUs = latencyUs;
++            Timestamp = DateTime.UtcNow;
++        }
++
++        public override string ToString()
++        {
++            return $"[{Timestamp:HH:mm:ss.fff}] [{Category}] ({Source}) {Detail}" + (LatencyUs > 0 ? $" (Latency: {LatencyUs}µs)" : string.Empty);
++        }
++    }
++
++    /// <summary>
++    /// Thread-safe Gameplay Anomaly Tracker & Debug Telemetry Interceptor for Ryubing.
++    /// Captures, logs, and aggregates anomalies during emulation sessions.
++    /// </summary>
++    public static class GameplayAnomalyTracker
++    {
++        private const int MaxRecentRecords = 256;
++        private static readonly ConcurrentQueue<AnomalyRecord> _recentRecords = new();
++        private static readonly long[] _categoryCounters = new long[Enum.GetValues<AnomalyCategory>().Length];
++        private static long _totalAnomalies;
++        private static readonly Stopwatch _uptime = Stopwatch.StartNew();
++
++        /// <summary>
++        /// Records an intercepted runtime anomaly or non-fatal debugging error.
++        /// </summary>
++        public static void RecordAnomaly(AnomalyCategory category, string source, string detail, long latencyUs = 0)
++        {
++            Interlocked.Increment(ref _totalAnomalies);
++            Interlocked.Increment(ref _categoryCounters[(int)category]);
++
++            var record = new AnomalyRecord(category, source, detail, latencyUs);
++            _recentRecords.Enqueue(record);
++
++            while (_recentRecords.Count > MaxRecentRecords && _recentRecords.TryDequeue(out _))
++            {
++                // Discard older entries in bounded ring buffer
++            }
++
++            Logger.Debug?.Print(LogClass.Application, $"[GameplayAnomaly:{category}] ({source}) {detail}");
++        }
++
++        /// <summary>
++        /// Gets the total count of anomalies caught for a specific category.
++        /// </summary>
++        public static long GetCount(AnomalyCategory category)
++        {
++            return Interlocked.Read(ref _categoryCounters[(int)category]);
++        }
++
++        /// <summary>
++        /// Gets the total count of all anomalies caught during this session.
++        /// </summary>
++        public static long GetTotalCount()
++        {
++            return Interlocked.Read(ref _totalAnomalies);
++        }
++
++        /// <summary>
++        /// Generates a human-readable telemetry scorecard summary of all captured anomalies.
++        /// </summary>
++        public static string GetSummaryString()
++        {
++            StringBuilder sb = new();
++            sb.AppendLine($"=== Ryubing Gameplay Anomaly Telemetry Summary (Session Uptime: {_uptime.Elapsed}) ===");
++            sb.AppendLine($"Total Anomalies Intercepted: {GetTotalCount()}");
++            foreach (AnomalyCategory cat in Enum.GetValues<AnomalyCategory>())
++            {
++                long cnt = GetCount(cat);
++                if (cnt > 0)
++                {
++                    sb.AppendLine($"  - {cat,-26}: {cnt}");
++                }
++            }
++            return sb.ToString();
++        }
++
++        /// <summary>
++        /// Dumps the current anomaly scorecard to the application notice log.
++        /// </summary>
++        public static void DumpDiagnostics()
++        {
++            Logger.Notice.Print(LogClass.Application, GetSummaryString());
++        }
++
++        /// <summary>
++        /// Resets all counters and ring buffers (used for testing or clean sessions).
++        /// </summary>
++        public static void Reset()
++        {
++            _recentRecords.Clear();
++            for (int i = 0; i < _categoryCounters.Length; i++)
++            {
++                Interlocked.Exchange(ref _categoryCounters[i], 0);
++            }
++            Interlocked.Exchange(ref _totalAnomalies, 0);
++        }
++    }
++}
+diff --git a/src/Ryujinx.Common/Logging/Targets/FileLogTarget.cs b/src/Ryujinx.Common/Logging/Targets/FileLogTarget.cs
+index 181bd489acaeb0e097fd7384ca0fccd168751d2a..d76a533c48b7fb2d511541fe50c2fe477167947e 100644
+--- a/src/Ryujinx.Common/Logging/Targets/FileLogTarget.cs
++++ b/src/Ryujinx.Common/Logging/Targets/FileLogTarget.cs
+@@ -54,17 +54,9 @@ namespace Ryujinx.Common.Logging.Targets
+                 {
+                     files[i].Delete();
+                 }
+-                catch (UnauthorizedAccessException exception)
++                catch (Exception exception)
+                 {
+-                    Logger.Warning?.Print(LogClass.Application, $"Old log file could not be deleted '{files[i].FullName}': {exception}");
+-
+-                    return null;
+-                }
+-                catch (IOException exception)
+-                {
+-                    Logger.Warning?.Print(LogClass.Application, $"Old log file could not be deleted '{files[i].FullName}': {exception}");
+-
+-                    return null;
++                    Logger.Warning?.Print(LogClass.Application, $"Old log file could not be deleted '{files[i].FullName}': {exception.Message}. Continuing log preparation.");
+                 }
+             }
+ 
+diff --git a/src/Ryujinx.Common/NativeMaxwellState.cs b/src/Ryujinx.Common/NativeMaxwellState.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..30faec92297fc8a2d1416e24e4ab3101d7123d66
+--- /dev/null
++++ b/src/Ryujinx.Common/NativeMaxwellState.cs
+@@ -0,0 +1,214 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Common
++{
++    public static unsafe class NativeMaxwellState
++    {
++        private const string LibraryName = "ryu_maxwell_state";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateTrackerFn();
++        private delegate void DestroyTrackerFn(IntPtr tracker);
++        private delegate void MapRegisterFn(IntPtr tracker, uint regOffset, byte groupIndex);
++        private delegate void MapRangeFn(IntPtr tracker, uint startOffset, uint sizeBytes, byte groupIndex);
++        private delegate void SetDirtyFn(IntPtr tracker, uint regOffset);
++        private delegate void SetDirtyBatchFn(IntPtr tracker, uint* offsets, nuint count);
++        private delegate void ForceDirtyFn(IntPtr tracker, byte groupIndex);
++        private delegate void SetAllDirtyFn(IntPtr tracker);
++        private delegate ulong GetDirtyMaskFn(IntPtr tracker);
++        private delegate ulong ScanChangesFn(IntPtr tracker, byte* current, byte* shadow, nuint len);
++        private delegate nuint CollectDirtyFn(IntPtr tracker, ulong checkMask, uint* outGroups, nuint maxGroups);
++        private delegate void ClearDirtyFn(IntPtr tracker, ulong mask);
++        private delegate ulong PipelineHash64Fn(byte* data, nuint len);
++        private delegate int PipelineHash32Fn(byte* data, nuint len);
++        private delegate int PipelineEqualsFn(byte* a, byte* b, nuint len);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateTrackerFn _create;
++        private static readonly DestroyTrackerFn _destroy;
++        private static readonly MapRegisterFn _mapRegister;
++        private static readonly MapRangeFn _mapRange;
++        private static readonly SetDirtyFn _setDirty;
++        private static readonly SetDirtyBatchFn _setDirtyBatch;
++        private static readonly ForceDirtyFn _forceDirty;
++        private static readonly SetAllDirtyFn _setAllDirty;
++        private static readonly GetDirtyMaskFn _getDirtyMask;
++        private static readonly ScanChangesFn _scanChanges;
++        private static readonly CollectDirtyFn _collectDirty;
++        private static readonly ClearDirtyFn _clearDirty;
++        private static readonly PipelineHash64Fn _pipelineHash64;
++        private static readonly PipelineHash32Fn _pipelineHash32;
++        private static readonly PipelineEqualsFn _pipelineEquals;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeMaxwellState()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_maxwell_state_version");
++                    _create = GetExport<CreateTrackerFn>(handle, "ryu_maxwell_tracker_create");
++                    _destroy = GetExport<DestroyTrackerFn>(handle, "ryu_maxwell_tracker_destroy");
++                    _mapRegister = GetExport<MapRegisterFn>(handle, "ryu_maxwell_tracker_map_register");
++                    _mapRange = GetExport<MapRangeFn>(handle, "ryu_maxwell_tracker_map_range");
++                    _setDirty = GetExport<SetDirtyFn>(handle, "ryu_maxwell_tracker_set_dirty");
++                    _setDirtyBatch = GetExport<SetDirtyBatchFn>(handle, "ryu_maxwell_tracker_set_dirty_batch");
++                    _forceDirty = GetExport<ForceDirtyFn>(handle, "ryu_maxwell_tracker_force_dirty");
++                    _setAllDirty = GetExport<SetAllDirtyFn>(handle, "ryu_maxwell_tracker_set_all_dirty");
++                    _getDirtyMask = GetExport<GetDirtyMaskFn>(handle, "ryu_maxwell_tracker_get_dirty_mask");
++                    _scanChanges = GetExport<ScanChangesFn>(handle, "ryu_maxwell_tracker_scan_changes");
++                    _collectDirty = GetExport<CollectDirtyFn>(handle, "ryu_maxwell_tracker_collect_dirty");
++                    _clearDirty = GetExport<ClearDirtyFn>(handle, "ryu_maxwell_tracker_clear_dirty");
++                    _pipelineHash64 = GetExport<PipelineHash64Fn>(handle, "ryu_maxwell_pipeline_hash64");
++                    _pipelineHash32 = GetExport<PipelineHash32Fn>(handle, "ryu_maxwell_pipeline_hash32");
++                    _pipelineEquals = GetExport<PipelineEqualsFn>(handle, "ryu_maxwell_pipeline_equals");
++
++                    _isAvailable = _version != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr CreateTracker() => _create != null ? _create() : IntPtr.Zero;
++
++        public static void DestroyTracker(IntPtr handle) => _destroy?.Invoke(handle);
++
++        public static void MapRegister(IntPtr handle, uint regOffset, byte groupIndex)
++        {
++            if (handle != IntPtr.Zero) _mapRegister?.Invoke(handle, regOffset, groupIndex);
++        }
++
++        public static void MapRange(IntPtr handle, uint startOffset, uint sizeBytes, byte groupIndex)
++        {
++            if (handle != IntPtr.Zero) _mapRange?.Invoke(handle, startOffset, sizeBytes, groupIndex);
++        }
++
++        public static void SetDirty(IntPtr handle, uint regOffset)
++        {
++            if (handle != IntPtr.Zero) _setDirty?.Invoke(handle, regOffset);
++        }
++
++        public static void ForceDirty(IntPtr handle, byte groupIndex)
++        {
++            if (handle != IntPtr.Zero) _forceDirty?.Invoke(handle, groupIndex);
++        }
++
++        public static void SetAllDirty(IntPtr handle)
++        {
++            if (handle != IntPtr.Zero) _setAllDirty?.Invoke(handle);
++        }
++
++        public static ulong GetDirtyMask(IntPtr handle)
++        {
++            return handle != IntPtr.Zero && _getDirtyMask != null ? _getDirtyMask(handle) : 0;
++        }
++
++        public static ulong ScanChanges(IntPtr handle, ReadOnlySpan<byte> current, ReadOnlySpan<byte> shadow)
++        {
++            if (handle == IntPtr.Zero || _scanChanges == null) return 0;
++            int len = Math.Min(current.Length, shadow.Length);
++            if (len == 0) return 0;
++            fixed (byte* pCurr = current)
++            fixed (byte* pShad = shadow)
++            {
++                return _scanChanges(handle, pCurr, pShad, (nuint)len);
++            }
++        }
++
++        public static int CollectDirty(IntPtr handle, ulong checkMask, Span<uint> outGroups)
++        {
++            if (handle == IntPtr.Zero || _collectDirty == null || outGroups.IsEmpty) return 0;
++            fixed (uint* pOut = outGroups)
++            {
++                return (int)_collectDirty(handle, checkMask, pOut, (nuint)outGroups.Length);
++            }
++        }
++
++        public static void ClearDirty(IntPtr handle, ulong mask)
++        {
++            if (handle != IntPtr.Zero) _clearDirty?.Invoke(handle, mask);
++        }
++
++        public static ulong PipelineHash64(ReadOnlySpan<byte> data)
++        {
++            if (_pipelineHash64 == null || data.IsEmpty) return 0;
++            fixed (byte* p = data)
++            {
++                return _pipelineHash64(p, (nuint)data.Length);
++            }
++        }
++
++        public static int PipelineHash32(ReadOnlySpan<byte> data)
++        {
++            if (_pipelineHash32 == null || data.IsEmpty) return 0;
++            fixed (byte* p = data)
++            {
++                return _pipelineHash32(p, (nuint)data.Length);
++            }
++        }
++
++        public static bool PipelineEquals(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
++        {
++            if (a.Length != b.Length) return false;
++            if (a.IsEmpty) return true;
++            if (_pipelineEquals == null) return a.SequenceEqual(b);
++            fixed (byte* pa = a)
++            fixed (byte* pb = b)
++            {
++                return _pipelineEquals(pa, pb, (nuint)a.Length) == 1;
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx.Cpu/LightningJit/Cache/JitCache.cs b/src/Ryujinx.Cpu/LightningJit/Cache/JitCache.cs
+index e637d7f32d5ce5b27f52a451214c7298408bcdc2..31a20a9695f4cfcfba3a6c8774a64b59e5ce1bde 100644
+--- a/src/Ryujinx.Cpu/LightningJit/Cache/JitCache.cs
++++ b/src/Ryujinx.Cpu/LightningJit/Cache/JitCache.cs
+@@ -1,5 +1,6 @@
+ using ARMeilleure.Memory;
+ using Humanizer;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Memory;
+ using System;
+@@ -139,6 +140,11 @@ namespace Ryujinx.Cpu.LightningJit.Cache
+             _cacheAllocator.AddNewBlocks(1);
+             ReservedRegion newRegion = new(_jitRegions[0].Allocator, CacheSize);
+             
++            GameplayAnomalyTracker.RecordAnomaly(
++                AnomalyCategory.JitCacheExhaustion,
++                "LightningJit.JitCache.Allocate",
++                $"JIT Cache of size {(_jitRegions.Count * CacheSize).Bytes()} exhausted, expanding to {((_jitRegions.Count + 1) * CacheSize).Bytes()}");
++
+             Logger.Warning?.Print(LogClass.Cpu, $"JIT Cache of size {(_jitRegions.Count * CacheSize).Bytes()} exhausted, creating new Cache Region ({((_jitRegions.Count + 1) * CacheSize).Bytes()} Total Allocation).");
+ 
+             _jitRegions.Add(newRegion);
+diff --git a/src/Ryujinx.Graphics.Gpu/Engine/Threed/ConstantBufferUpdater.cs b/src/Ryujinx.Graphics.Gpu/Engine/Threed/ConstantBufferUpdater.cs
+index 6fc49fc8dfd0b30004011d6e3518592d518eebca..8eef8cf145aad844f7264663e55816612df332b1 100644
+--- a/src/Ryujinx.Graphics.Gpu/Engine/Threed/ConstantBufferUpdater.cs
++++ b/src/Ryujinx.Graphics.Gpu/Engine/Threed/ConstantBufferUpdater.cs
+@@ -115,10 +115,28 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
+                 MemoryManager memoryManager = _channel.MemoryManager;
+ 
+                 Span<byte> data = MemoryMarshal.Cast<int, byte>(_ubData.AsSpan(0, (int)(_ubByteCount / 4)));
++                ulong uboBaseGpuAddr = _ubFollowUpAddress - _ubByteCount;
++
++                if (NativeBufferDiff.IsAvailable && memoryManager.Physical.IsMapped(_ubBeginCpuAddress))
++                {
++                    ReadOnlySpan<byte> current = memoryManager.Physical.GetSpan(_ubBeginCpuAddress, data.Length);
++                    if (NativeBufferDiff.TryFindDirtyRange(data, current, out int off, out int len))
++                    {
++                        if (len > 0)
++                        {
++                            memoryManager.Physical.Write(_ubBeginCpuAddress + (ulong)off, data.Slice(off, len));
++                            memoryManager.Physical.BufferCache.ForceDirty(memoryManager, uboBaseGpuAddr + (ulong)off, (ulong)len);
++                        }
++
++                        _ubFollowUpAddress = 0;
++                        _ubIndex = 0;
++                        return;
++                    }
++                }
+ 
+                 if (memoryManager.Physical.WriteWithRedundancyCheck(_ubBeginCpuAddress, data))
+                 {
+-                    memoryManager.Physical.BufferCache.ForceDirty(memoryManager, _ubFollowUpAddress - _ubByteCount, _ubByteCount);
++                    memoryManager.Physical.BufferCache.ForceDirty(memoryManager, uboBaseGpuAddr, _ubByteCount);
+                 }
+ 
+                 _ubFollowUpAddress = 0;
+diff --git a/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs b/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
+index 3e77eb8acd86857fdcd4c4cf170934b457546913..7de2d6c8b07b8de2b63e66be0779495b2222784e 100644
+--- a/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
++++ b/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
+@@ -1,3 +1,4 @@
++using Ryujinx.Common;
+ using System;
+ using System.Collections.Generic;
+ using System.Diagnostics;
+@@ -48,6 +49,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
+         private readonly byte[] _registerToGroupMapping;
+         private readonly Action[] _callbacks;
+         private ulong _dirtyMask;
++        private readonly IntPtr _nativeTracker;
+ 
+         /// <summary>
+         /// Creates a new instance of the state update tracker.
+@@ -57,6 +59,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
+         {
+             _registerToGroupMapping = new byte[BlockSize];
+             _callbacks = new Action[entries.Length];
++            _nativeTracker = NativeMaxwellState.IsAvailable ? NativeMaxwellState.CreateTracker() : IntPtr.Zero;
+ 
+             Dictionary<string, int> fieldToDelegate = new();
+ 
+@@ -86,10 +89,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
+ 
+                 if (fieldToDelegate.TryGetValue(field.Name, out int entryIndex))
+                 {
+-                    for (int i = 0; i < ((sizeOfField + 3) & ~3); i += 4)
++                    int alignedSize = (sizeOfField + 3) & ~3;
++                    for (int i = 0; i < alignedSize; i += 4)
+                     {
+                         _registerToGroupMapping[(offset + i) / RegisterSize] = (byte)(entryIndex + 1);
+                     }
++                    if (_nativeTracker != IntPtr.Zero)
++                    {
++                        NativeMaxwellState.MapRange(_nativeTracker, (uint)offset, (uint)alignedSize, (byte)entryIndex);
++                    }
+                 }
+ 
+                 offset += sizeOfField;
+@@ -176,5 +184,32 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
+ 
+             _dirtyMask &= ~checkMask;
+         }
++
++        public void ScanChanges(ReadOnlySpan<byte> current, ReadOnlySpan<byte> shadow)
++        {
++            if (_nativeTracker != IntPtr.Zero)
++            {
++                _dirtyMask |= NativeMaxwellState.ScanChanges(_nativeTracker, current, shadow);
++                return;
++            }
++
++            int len = Math.Min(current.Length, shadow.Length);
++            for (int off = 0; off + 4 <= len && (off / RegisterSize) < BlockSize; off += 4)
++            {
++                if (Unsafe.ReadUnaligned<uint>(ref MemoryMarshal.GetReference(current[off..])) !=
++                    Unsafe.ReadUnaligned<uint>(ref MemoryMarshal.GetReference(shadow[off..])))
++                {
++                    SetDirty(off);
++                }
++            }
++        }
++
++        ~StateUpdateTracker()
++        {
++            if (_nativeTracker != IntPtr.Zero)
++            {
++                NativeMaxwellState.DestroyTracker(_nativeTracker);
++            }
++        }
+     }
+ }
+diff --git a/src/Ryujinx.Graphics.Gpu/Image/NativeTextureMatcher.cs b/src/Ryujinx.Graphics.Gpu/Image/NativeTextureMatcher.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc0866618e49fe79dae78d1e33130c4865d6a306
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Gpu/Image/NativeTextureMatcher.cs
+@@ -0,0 +1,234 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Graphics.Gpu.Image
++{
++    internal static class NativeTextureMatcher
++    {
++        private const string LibraryName = "ryu_texture_matcher";
++
++        private delegate uint VersionFn();
++        private delegate ulong PackKeyFn(
++            ushort format,
++            byte target,
++            byte swizzleR,
++            byte swizzleG,
++            byte swizzleB,
++            byte swizzleA,
++            byte depthStencilMode,
++            byte samplesX,
++            byte samplesY,
++            int isLinear,
++            byte bpp,
++            int isCompressed,
++            int isDepthStencil);
++
++        private delegate int SamplerMatchesFn(ulong keyA, ulong keyB);
++        private delegate int TargetSamplesCompatibleFn(ulong keyA, ulong keyB);
++        private delegate int FormatMatchesFn(uint formatA, uint formatB, int forSampler, int depthAlias);
++        private delegate int ViewTargetCompatibleFn(uint targetA, uint targetB, int supportsCubemap);
++        private delegate uint GetFormatClassFn(uint format);
++        private delegate int ViewFormatCompatibleFn(ulong keyA, ulong keyB, int capsIncompatA, int capsIncompatB, int forSampler, int depthAlias);
++
++        private static readonly VersionFn _version;
++        private static readonly PackKeyFn _packKey;
++        private static readonly SamplerMatchesFn _samplerMatches;
++        private static readonly TargetSamplesCompatibleFn _targetSamplesCompatible;
++        private static readonly FormatMatchesFn _formatMatches;
++        private static readonly ViewTargetCompatibleFn _viewTargetCompatible;
++        private static readonly GetFormatClassFn _getFormatClass;
++        private static readonly ViewFormatCompatibleFn _viewFormatCompatible;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeTextureMatcher()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_texture_matcher_version");
++                    _packKey = GetExport<PackKeyFn>(handle, "ryu_texture_pack_key");
++                    _samplerMatches = GetExport<SamplerMatchesFn>(handle, "ryu_texture_sampler_matches");
++                    _targetSamplesCompatible = GetExport<TargetSamplesCompatibleFn>(handle, "ryu_texture_target_samples_compatible");
++                    _formatMatches = GetExport<FormatMatchesFn>(handle, "ryu_texture_format_matches");
++                    _viewTargetCompatible = GetExport<ViewTargetCompatibleFn>(handle, "ryu_texture_view_target_compatible");
++                    _getFormatClass = GetExport<GetFormatClassFn>(handle, "ryu_texture_get_format_class");
++                    _viewFormatCompatible = GetExport<ViewFormatCompatibleFn>(handle, "ryu_texture_view_format_compatible");
++
++                    _isAvailable = _version != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static ulong PackKey(
++            ushort format,
++            byte target,
++            byte swizzleR,
++            byte swizzleG,
++            byte swizzleB,
++            byte swizzleA,
++            byte depthStencilMode,
++            byte samplesX,
++            byte samplesY,
++            bool isLinear,
++            byte bpp,
++            bool isCompressed,
++            bool isDepthStencil)
++        {
++            if (_packKey != null)
++            {
++                return _packKey(
++                    format,
++                    target,
++                    swizzleR,
++                    swizzleG,
++                    swizzleB,
++                    swizzleA,
++                    depthStencilMode,
++                    samplesX,
++                    samplesY,
++                    isLinear ? 1 : 0,
++                    bpp,
++                    isCompressed ? 1 : 0,
++                    isDepthStencil ? 1 : 0);
++            }
++
++            // Fallback bit-packing in C#
++            ulong v = (ulong)format & 0xFFFF;
++            v |= ((ulong)target & 0xFF) << 16;
++            v |= ((ulong)swizzleR & 0x07) << 24;
++            v |= ((ulong)swizzleG & 0x07) << 27;
++            v |= ((ulong)swizzleB & 0x07) << 30;
++            v |= ((ulong)swizzleA & 0x07) << 33;
++            v |= ((ulong)depthStencilMode & 0x01) << 36;
++            v |= ((ulong)samplesX & 0x0F) << 37;
++            v |= ((ulong)samplesY & 0x0F) << 41;
++            if (isLinear) v |= 1UL << 45;
++            v |= ((ulong)bpp & 0x3F) << 46;
++            if (isCompressed) v |= 1UL << 58;
++            if (isDepthStencil) v |= 1UL << 59;
++            return v;
++        }
++
++        public static bool SamplerMatches(ulong keyA, ulong keyB)
++        {
++            if (_samplerMatches != null)
++            {
++                return _samplerMatches(keyA, keyB) != 0;
++            }
++            const ulong samplerMask = 0x0000_001F_FF00_0000;
++            return ((keyA ^ keyB) & samplerMask) == 0;
++        }
++
++        public static bool TargetSamplesCompatible(ulong keyA, ulong keyB)
++        {
++            if (_targetSamplesCompatible != null)
++            {
++                return _targetSamplesCompatible(keyA, keyB) != 0;
++            }
++            const ulong targetMask = 0x0000_0000_00FF_0000;
++            const ulong samplesMask = 0x0000_1FE0_0000_0000;
++            const ulong targetAndSamplesMask = targetMask | samplesMask;
++            return ((keyA ^ keyB) & targetAndSamplesMask) == 0;
++        }
++
++        public static TextureMatchQuality FormatMatches(uint formatA, uint formatB, bool forSampler, bool depthAlias)
++        {
++            if (_formatMatches != null)
++            {
++                return (TextureMatchQuality)_formatMatches(formatA, formatB, forSampler ? 1 : 0, depthAlias ? 1 : 0);
++            }
++            return formatA == formatB ? TextureMatchQuality.Perfect : TextureMatchQuality.NoMatch;
++        }
++
++        public static TextureViewCompatibility ViewTargetCompatible(uint targetA, uint targetB, bool supportsCubemap)
++        {
++            if (_viewTargetCompatible != null)
++            {
++                return (TextureViewCompatibility)_viewTargetCompatible(targetA, targetB, supportsCubemap ? 1 : 0);
++            }
++            return targetA == targetB ? TextureViewCompatibility.Full : TextureViewCompatibility.Incompatible;
++        }
++
++        public static byte GetFormatClass(uint format)
++        {
++            if (_getFormatClass != null)
++            {
++                return (byte)_getFormatClass(format);
++            }
++            return 0;
++        }
++
++        public static TextureViewCompatibility ViewFormatCompatible(
++            ulong keyA,
++            ulong keyB,
++            bool capsIncompatA,
++            bool capsIncompatB,
++            bool forSampler,
++            bool depthAlias)
++        {
++            if (_viewFormatCompatible != null)
++            {
++                return (TextureViewCompatibility)_viewFormatCompatible(
++                    keyA,
++                    keyB,
++                    capsIncompatA ? 1 : 0,
++                    capsIncompatB ? 1 : 0,
++                    forSampler ? 1 : 0,
++                    depthAlias ? 1 : 0);
++            }
++            return TextureViewCompatibility.Incompatible;
++        }
++    }
++}
+diff --git a/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs b/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
+index af7e9a7afae3db366b1f769dac5337d0551d53db..f034007d347eae026d0fd675fbb9df3abfc8410f 100644
+--- a/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
++++ b/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
+@@ -227,6 +227,10 @@ namespace Ryujinx.Graphics.Gpu.Image
+         /// <returns>A value indicating how well the formats match</returns>
+         public static TextureMatchQuality FormatMatches(TextureInfo lhs, TextureInfo rhs, bool forSampler, bool depthAlias)
+         {
++            if (NativeTextureMatcher.IsAvailable)
++            {
++                return NativeTextureMatcher.FormatMatches((uint)lhs.FormatInfo.Format, (uint)rhs.FormatInfo.Format, forSampler, depthAlias);
++            }
+             // D32F and R32F texture have the same representation internally,
+             // however the R32F format is used to sample from depth textures.
+             if (IsValidDepthAsColorAlias(lhs.FormatInfo.Format, rhs.FormatInfo.Format) && (forSampler || depthAlias))
+@@ -819,8 +823,31 @@ namespace Ryujinx.Graphics.Gpu.Image
+         /// <param name="lhs">Texture information to compare</param>
+         /// <param name="rhs">Texture information to compare with</param>
+         /// <returns>True if the texture shader sampling parameters matches, false otherwise</returns>
++        private static ulong PackTextureKey(TextureInfo info)
++        {
++            return NativeTextureMatcher.PackKey(
++                (ushort)info.FormatInfo.Format,
++                (byte)info.Target,
++                (byte)info.SwizzleR,
++                (byte)info.SwizzleG,
++                (byte)info.SwizzleB,
++                (byte)info.SwizzleA,
++                (byte)info.DepthStencilMode,
++                (byte)info.SamplesInX,
++                (byte)info.SamplesInY,
++                info.IsLinear,
++                info.FormatInfo.BytesPerPixel,
++                info.FormatInfo.IsCompressed,
++                info.FormatInfo.Format.IsDepthOrStencil);
++        }
++
+         public static bool SamplerParamsMatches(TextureInfo lhs, TextureInfo rhs)
+         {
++            if (NativeTextureMatcher.IsAvailable)
++            {
++                return NativeTextureMatcher.SamplerMatches(PackTextureKey(lhs), PackTextureKey(rhs));
++            }
++
+             return lhs.DepthStencilMode == rhs.DepthStencilMode &&
+                    lhs.SwizzleR == rhs.SwizzleR &&
+                    lhs.SwizzleG == rhs.SwizzleG &&
+@@ -836,6 +863,11 @@ namespace Ryujinx.Graphics.Gpu.Image
+         /// <returns>True if the texture target and samples count matches, false otherwise</returns>
+         public static bool TargetAndSamplesCompatible(TextureInfo lhs, TextureInfo rhs)
+         {
++            if (NativeTextureMatcher.IsAvailable)
++            {
++                return NativeTextureMatcher.TargetSamplesCompatible(PackTextureKey(lhs), PackTextureKey(rhs));
++            }
++
+             return lhs.Target == rhs.Target &&
+                    lhs.SamplesInX == rhs.SamplesInX &&
+                    lhs.SamplesInY == rhs.SamplesInY;
+@@ -848,6 +880,11 @@ namespace Ryujinx.Graphics.Gpu.Image
+         /// <returns>Format class</returns>
+         private static FormatClass GetFormatClass(Format format)
+         {
++            if (NativeTextureMatcher.IsAvailable)
++            {
++                return (FormatClass)NativeTextureMatcher.GetFormatClass((uint)format);
++            }
++
+             return format switch
+             {
+                 Format.Bc1RgbaSrgb or Format.Bc1RgbaUnorm => FormatClass.Bc1Rgba,
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/NativeBufferDiff.cs b/src/Ryujinx.Graphics.Gpu/Memory/NativeBufferDiff.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..826c2c736b5260e2e9eb669326f32534dda37fa7
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Gpu/Memory/NativeBufferDiff.cs
+@@ -0,0 +1,175 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Graphics.Gpu.Memory
++{
++    public static unsafe class NativeBufferDiff
++    {
++        private const string LibraryName = "ryu_buffer_diff";
++
++        private delegate uint VersionFn();
++        private delegate int FindDirtyRangeFn(byte* src, byte* dst, nuint len, nuint* outOffset, nuint* outLength);
++        private delegate int DiffAndCopyFn(byte* src, byte* dst, nuint len, nuint* outOffset, nuint* outLength);
++        private delegate int IsEqualFn(byte* a, byte* b, nuint len);
++
++        private static readonly VersionFn _version;
++        private static readonly FindDirtyRangeFn _findDirtyRange;
++        private static readonly DiffAndCopyFn _diffAndCopy;
++        private static readonly IsEqualFn _isEqual;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeBufferDiff()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_buffer_diff_version");
++                    _findDirtyRange = GetExport<FindDirtyRangeFn>(handle, "ryu_buffer_find_dirty_range");
++                    _diffAndCopy = GetExport<DiffAndCopyFn>(handle, "ryu_buffer_diff_and_copy");
++                    _isEqual = GetExport<IsEqualFn>(handle, "ryu_buffer_is_equal");
++
++                    _isAvailable = _version != null && _findDirtyRange != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static bool TryFindDirtyRange(ReadOnlySpan<byte> src, ReadOnlySpan<byte> dst, out int offset, out int length)
++        {
++            offset = 0;
++            length = 0;
++
++            if (!_isAvailable || src.IsEmpty || dst.IsEmpty)
++            {
++                return false;
++            }
++
++            int len = Math.Min(src.Length, dst.Length);
++            nuint outOff = 0;
++            nuint outLen = 0;
++
++            fixed (byte* pSrc = src)
++            fixed (byte* pDst = dst)
++            {
++                int res = _findDirtyRange(pSrc, pDst, (nuint)len, &outOff, &outLen);
++                if (res >= 0)
++                {
++                    offset = (int)outOff;
++                    length = (int)outLen;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++
++        public static bool TryDiffAndCopy(ReadOnlySpan<byte> src, Span<byte> dst, out int offset, out int length)
++        {
++            offset = 0;
++            length = 0;
++
++            if (!_isAvailable || src.IsEmpty || dst.IsEmpty)
++            {
++                return false;
++            }
++
++            int len = Math.Min(src.Length, dst.Length);
++            nuint outOff = 0;
++            nuint outLen = 0;
++
++            fixed (byte* pSrc = src)
++            fixed (byte* pDst = dst)
++            {
++                int res = _diffAndCopy(pSrc, pDst, (nuint)len, &outOff, &outLen);
++                if (res >= 0)
++                {
++                    offset = (int)outOff;
++                    length = (int)outLen;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++
++        public static bool TryIsEqual(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, out bool isEqual)
++        {
++            isEqual = false;
++
++            if (!_isAvailable || a.Length != b.Length)
++            {
++                return false;
++            }
++
++            if (a.IsEmpty)
++            {
++                isEqual = true;
++                return true;
++            }
++
++            fixed (byte* pA = a)
++            fixed (byte* pB = b)
++            {
++                int res = _isEqual(pA, pB, (nuint)a.Length);
++                if (res >= 0)
++                {
++                    isEqual = res == 1;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++    }
++}
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs b/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
+index 0b1424b8a1d03d4ef1222fe74ea01cc5964a5a92..01a46e42991e507b5d5ab613bd1aed5c86b8aa48 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
+@@ -308,6 +308,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
+         /// <returns>True if the data was changed, false otherwise</returns>
+         public bool WriteWithRedundancyCheck(ulong address, ReadOnlySpan<byte> data)
+         {
++            if (NativeBufferDiff.IsAvailable && data.Length >= 32 && _cpuMemory.IsMapped(address))
++            {
++                ReadOnlySpan<byte> current = _cpuMemory.GetSpan(address, data.Length);
++                if (NativeBufferDiff.TryIsEqual(data, current, out bool isEqual))
++                {
++                    if (isEqual)
++                    {
++                        return false;
++                    }
++
++                    _cpuMemory.Write(address, data);
++                    return true;
++                }
++            }
++
+             return _cpuMemory.WriteWithRedundancyCheck(address, data);
+         }
+ 
+diff --git a/src/Ryujinx.Graphics.Gpu/Shader/DiskCache/NativeShaderCache.cs b/src/Ryujinx.Graphics.Gpu/Shader/DiskCache/NativeShaderCache.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..433c7c112c63c103ed66d5258e52e46e52f144e7
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Gpu/Shader/DiskCache/NativeShaderCache.cs
+@@ -0,0 +1,182 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
++{
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeTocHeader
++    {
++        public uint Magic;
++        public uint FormatVersion;
++        public uint CodeGenVersion;
++        public uint Padding;
++        public ulong Timestamp;
++        public ulong Reserved;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeOffsetAndSize
++    {
++        public ulong Offset;
++        public uint UncompressedSize;
++        public uint CompressedSize;
++    }
++
++    public static unsafe class NativeShaderCache
++    {
++        private const string LibraryName = "ryu_shader_cache";
++
++        private delegate uint VersionFn();
++        private delegate int ValidateTocFn(byte* data, nuint len, uint expectedMagic, NativeTocHeader* outHeader);
++        private delegate int ParseEntriesFn(byte* data, nuint len, NativeOffsetAndSize* outEntries, nuint maxEntries);
++        private delegate int DecompressLz4Fn(byte* src, nuint srcLen, byte* dst, nuint dstCap, nuint* outLen);
++        private delegate uint Crc32Fn(byte* data, nuint len);
++
++        private static readonly VersionFn _version;
++        private static readonly ValidateTocFn _validateToc;
++        private static readonly ParseEntriesFn _parseEntries;
++        private static readonly DecompressLz4Fn _decompressLz4;
++        private static readonly Crc32Fn _crc32;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeShaderCache()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_shader_cache_version");
++                    _validateToc = GetExport<ValidateTocFn>(handle, "ryu_shader_cache_validate_toc");
++                    _parseEntries = GetExport<ParseEntriesFn>(handle, "ryu_shader_cache_parse_entries");
++                    _decompressLz4 = GetExport<DecompressLz4Fn>(handle, "ryu_shader_cache_decompress_lz4");
++                    _crc32 = GetExport<Crc32Fn>(handle, "ryu_shader_cache_crc32");
++
++                    _isAvailable = _version != null && _validateToc != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static bool TryValidateToc(ReadOnlySpan<byte> data, uint expectedMagic, out NativeTocHeader header)
++        {
++            header = default;
++            if (!_isAvailable || data.Length < sizeof(NativeTocHeader))
++            {
++                return false;
++            }
++
++            fixed (byte* pData = data)
++            fixed (NativeTocHeader* pHdr = &header)
++            {
++                return _validateToc(pData, (nuint)data.Length, expectedMagic, pHdr) == 0;
++            }
++        }
++
++        public static bool TryParseEntries(ReadOnlySpan<byte> data, Span<NativeOffsetAndSize> destination, out int count)
++        {
++            count = 0;
++            if (!_isAvailable || data.Length < sizeof(NativeTocHeader) || destination.IsEmpty)
++            {
++                return false;
++            }
++
++            fixed (byte* pData = data)
++            fixed (NativeOffsetAndSize* pDst = destination)
++            {
++                int res = _parseEntries(pData, (nuint)data.Length, pDst, (nuint)destination.Length);
++                if (res >= 0)
++                {
++                    count = res;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++
++        public static bool TryDecompressLz4(ReadOnlySpan<byte> src, Span<byte> dst, out int uncompressedLength)
++        {
++            uncompressedLength = 0;
++            if (!_isAvailable || src.IsEmpty || dst.IsEmpty)
++            {
++                return false;
++            }
++
++            nuint outLen = 0;
++            fixed (byte* pSrc = src)
++            fixed (byte* pDst = dst)
++            {
++                if (_decompressLz4(pSrc, (nuint)src.Length, pDst, (nuint)dst.Length, &outLen) == 0)
++                {
++                    uncompressedLength = (int)outLen;
++                    return true;
++                }
++            }
++
++            return false;
++        }
++
++        public static uint ComputeCrc32(ReadOnlySpan<byte> data)
++        {
++            if (!_isAvailable || data.IsEmpty)
++            {
++                return 0;
++            }
++
++            fixed (byte* pData = data)
++            {
++                return _crc32(pData, (nuint)data.Length);
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx.Graphics.Gpu/Synchronization/SynchronizationManager.cs b/src/Ryujinx.Graphics.Gpu/Synchronization/SynchronizationManager.cs
+index d51b0ef60dc2574a9b34a6eb9da613e180354b15..6a5d6edd140899150a321a19a06dfb60c4ff5ab5 100644
+--- a/src/Ryujinx.Graphics.Gpu/Synchronization/SynchronizationManager.cs
++++ b/src/Ryujinx.Graphics.Gpu/Synchronization/SynchronizationManager.cs
+@@ -1,3 +1,4 @@
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Graphics.Device;
+ using System;
+@@ -80,12 +81,6 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
+         {
+             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(id, (uint)MaxHardwareSyncpoints);
+ 
+-            // TODO: Remove this when GPU channel scheduling will be implemented.
+-            if (timeout == Timeout.InfiniteTimeSpan)
+-            {
+-                timeout = TimeSpan.FromSeconds(1);
+-            }
+-
+             using ManualResetEvent waitEvent = new(false);
+             SyncpointWaiterHandle info = _syncpoints[id].RegisterCallback(threshold, _ => waitEvent.Set());
+ 
+@@ -94,13 +89,59 @@ namespace Ryujinx.Graphics.Gpu.Synchronization
+                 return false;
+             }
+ 
+-            bool signaled = waitEvent.WaitOne(timeout);
++            bool isInfinite = timeout == Timeout.InfiniteTimeSpan;
++            bool signaled = false;
+ 
+-            if (!signaled)
++            if (isInfinite)
+             {
+-                Logger.Error?.Print(LogClass.Gpu, $"Wait on syncpoint {id} for threshold {threshold} took more than {timeout.TotalMilliseconds}ms, resuming execution...");
++                // Graceful adaptive wait loop for heavy shader compilation / pipeline creation on mid/low-spec devices:
++                // Instead of aborting after 1s and desyncing CPU-GPU, wait in heartbeats up to 60 seconds.
++                const int heartbeatMs = 2000;
++                const int maxWaitMs = 60000;
++                int elapsedMs = 0;
++
++                while (!(signaled = waitEvent.WaitOne(heartbeatMs)))
++                {
++                    elapsedMs += heartbeatMs;
++                    GameplayAnomalyTracker.RecordAnomaly(
++                        AnomalyCategory.GpuSyncpointTimeout,
++                        "SynchronizationManager.WaitOnSyncpoint",
++                        $"GPU busy on syncpoint {id} (threshold {threshold}), waiting for shader compilation ({elapsedMs}ms elapsed)",
++                        elapsedMs * 1000);
++
++                    if (elapsedMs < maxWaitMs)
++                    {
++                        Logger.Debug?.Print(LogClass.Gpu, $"[GameplayAnomaly:GpuSync] GPU processing thread is compiling shaders/pipelines on syncpoint {id} (threshold {threshold}, {elapsedMs}ms elapsed). Grace period active...");
++                    }
++                    else
++                    {
++                        Logger.Warning?.Print(LogClass.Gpu, $"Wait on syncpoint {id} for threshold {threshold} reached deadlock guard limit of {maxWaitMs}ms, resuming execution...");
++                        _syncpoints[id].UnregisterCallback(info);
++                        break;
++                    }
++                }
++
++                if (signaled && elapsedMs > 0)
++                {
++                    Logger.Notice.Print(LogClass.Gpu, $"[GameplayRecovery:GpuSync] GPU caught up on syncpoint {id} (threshold {threshold}) after {elapsedMs}ms. Resuming synchronized execution.");
++                }
++            }
++            else
++            {
++                signaled = waitEvent.WaitOne(timeout);
++
++                if (!signaled)
++                {
++                    GameplayAnomalyTracker.RecordAnomaly(
++                        AnomalyCategory.GpuSyncpointTimeout,
++                        "SynchronizationManager.WaitOnSyncpoint",
++                        $"Finite wait on syncpoint {id} for threshold {threshold} timed out after {timeout.TotalMilliseconds}ms",
++                        (long)(timeout.TotalMilliseconds * 1000));
++
++                    Logger.Warning?.Print(LogClass.Gpu, $"Wait on syncpoint {id} for threshold {threshold} took more than {timeout.TotalMilliseconds}ms, resuming execution...");
+ 
+-                _syncpoints[id].UnregisterCallback(info);
++                    _syncpoints[id].UnregisterCallback(info);
++                }
+             }
+ 
+             return !signaled;
+diff --git a/src/Ryujinx.Graphics.Shader/CodeGen/Glsl/GlslGenerator.cs b/src/Ryujinx.Graphics.Shader/CodeGen/Glsl/GlslGenerator.cs
+index 469c4f0a2c0ff79dbc9aa40fdb36b558abb07314..99bc956375804218559c3346bb617bfbaa1bc67d 100644
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Glsl/GlslGenerator.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Glsl/GlslGenerator.cs
+@@ -1,5 +1,6 @@
+ using Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions;
+ using Ryujinx.Graphics.Shader.StructuredIr;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Graphics.Shader.Translation;
+ using System;
+ 
+@@ -128,6 +129,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl
+                             // so skip emitting the barrier for those cases.
+                             if (visitor.Block.Type != AstBlockType.Main || mayHaveReturned || !isMainFunction)
+                             {
++                                GameplayAnomalyTracker.RecordAnomaly(AnomalyCategory.ShaderDivergentBarrier, "GlslGenerator", "Shader has barrier on potentially divergent block, barrier safely removed");
+                                 context.Logger.Log("Shader has barrier on potentially divergent block, the barrier will be removed.");
+ 
+                                 continue;
+diff --git a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
+index 79383ec4d9e9913ae55fb9fcf5dbd12870853bc9..bc9504aad0942100d42cfd9ac92496cd120424e5 100644
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
+@@ -1,5 +1,6 @@
+ using Ryujinx.Graphics.Shader.IntermediateRepresentation;
+ using Ryujinx.Graphics.Shader.StructuredIr;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Graphics.Shader.Translation;
+ using System;
+ using System.Collections.Generic;
+@@ -244,6 +245,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
+             if (!context.HostCapabilities.SupportsShaderBarrierDivergence &&
+                 (context.CurrentBlock.Type != AstBlockType.Main || context.MayHaveReturned || !context.IsMainFunction))
+             {
++                GameplayAnomalyTracker.RecordAnomaly(AnomalyCategory.ShaderDivergentBarrier, "SpirvGenerator", "Shader has barrier on potentially divergent block, barrier safely removed");
+                 context.Logger.Log("Shader has barrier on potentially divergent block, the barrier will be removed.");
+ 
+                 return OperationResult.Invalid;
+diff --git a/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs b/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
+index 2daa048561fe853f0416d1d762e2341f73b9f677..0344f8ed79c774d7a9c9aba442cf242147de03bf 100644
+--- a/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
++++ b/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
+@@ -125,12 +125,18 @@ namespace Ryujinx.Graphics.Vulkan
+         private readonly SamplerHolder _dummySampler;
+ 
+         public List<TextureView> FeedbackLoopHazards { get; private set; }
++        private readonly IntPtr _nativeDescriptorState;
+ 
+         public DescriptorSetUpdater(VulkanRenderer gd, Device device)
+         {
+             _gd = gd;
+             _device = device;
+ 
++            if (NativeVulkanDescriptors.IsAvailable)
++            {
++                _nativeDescriptorState = NativeVulkanDescriptors.Create();
++            }
++
+             // Some of the bindings counts needs to be multiplied by 2 because we have buffer and
+             // regular textures/images interleaved on the same descriptor set.
+ 
+@@ -450,6 +456,17 @@ namespace Ryujinx.Graphics.Vulkan
+ 
+                     currentInfo = info;
+                     currentBufferRef = newRef;
++
++                    if (_nativeDescriptorState != IntPtr.Zero)
++                    {
++                        NativeVulkanDescriptors.UpdateBuffer(
++                            _nativeDescriptorState,
++                            NativeVulkanDescriptors.SetStorage,
++                            (uint)index,
++                            vkBuffer?.GetUnsafe().Value.Handle ?? 0,
++                            info.Offset,
++                            info.Range);
++                    }
+                 }
+             }
+ 
+@@ -660,6 +677,17 @@ namespace Ryujinx.Graphics.Vulkan
+ 
+                     currentInfo = info;
+                     currentBufferRef = newRef;
++
++                    if (_nativeDescriptorState != IntPtr.Zero)
++                    {
++                        NativeVulkanDescriptors.UpdateBuffer(
++                            _nativeDescriptorState,
++                            NativeVulkanDescriptors.SetUniform,
++                            (uint)index,
++                            vkBuffer?.GetUnsafe().Value.Handle ?? 0,
++                            info.Offset,
++                            info.Range);
++                    }
+                 }
+             }
+ 
+@@ -1174,6 +1202,11 @@ namespace Ryujinx.Graphics.Vulkan
+ 
+         protected virtual void Dispose(bool disposing)
+         {
++            if (_nativeDescriptorState != IntPtr.Zero)
++            {
++                NativeVulkanDescriptors.Destroy(_nativeDescriptorState);
++            }
++
+             if (disposing)
+             {
+                 _dummyTexture.Dispose();
+diff --git a/src/Ryujinx.Graphics.Vulkan/NativeVulkanDescriptors.cs b/src/Ryujinx.Graphics.Vulkan/NativeVulkanDescriptors.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6075811128a9b62a860f42c74ee083cc7d547945
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Vulkan/NativeVulkanDescriptors.cs
+@@ -0,0 +1,207 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Graphics.Vulkan
++{
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeDescriptorBufferInfo
++    {
++        public ulong BufferHandle;
++        public ulong Offset;
++        public ulong Range;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeDescriptorImageInfo
++    {
++        public ulong SamplerHandle;
++        public ulong ImageViewHandle;
++        public uint ImageLayout;
++        public uint Pad;
++    }
++
++    public static unsafe class NativeVulkanDescriptors
++    {
++        private const string LibraryName = "ryu_vulkan_descriptors";
++
++        public const uint SetUniform = 0;
++        public const uint SetStorage = 1;
++        public const uint SetTexture = 2;
++        public const uint SetImage = 3;
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn();
++        private delegate void DestroyFn(IntPtr state);
++        private delegate void ResetFn(IntPtr state);
++        private delegate int UpdateBufferFn(IntPtr state, uint setType, uint index, ulong bufferHandle, ulong offset, ulong range);
++        private delegate int UpdateImageFn(IntPtr state, uint setType, uint index, ulong samplerHandle, ulong imageViewHandle, uint layout);
++        private delegate int FilterRedundantBuffersFn(IntPtr state, uint setType, uint* outIndices, NativeDescriptorBufferInfo* outInfos, nuint capacity, nuint* outCount);
++        private delegate int FilterRedundantImagesFn(IntPtr state, uint setType, uint* outIndices, NativeDescriptorImageInfo* outInfos, nuint capacity, nuint* outCount);
++        private delegate int PackTemplateSliceFn(IntPtr state, uint setType, uint binding, uint count, byte* outBuf, nuint outBufLen, nuint* outWritten);
++        private delegate int CommitAllFn(IntPtr state, uint setType);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly ResetFn _reset;
++        private static readonly UpdateBufferFn _updateBuffer;
++        private static readonly UpdateImageFn _updateImage;
++        private static readonly FilterRedundantBuffersFn _filterRedundantBuffers;
++        private static readonly FilterRedundantImagesFn _filterRedundantImages;
++        private static readonly PackTemplateSliceFn _packTemplateSlice;
++        private static readonly CommitAllFn _commitAll;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeVulkanDescriptors()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_vulkan_descriptors_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_vulkan_descriptors_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_vulkan_descriptors_destroy");
++                    _reset = GetExport<ResetFn>(handle, "ryu_vulkan_descriptors_reset");
++                    _updateBuffer = GetExport<UpdateBufferFn>(handle, "ryu_vulkan_descriptors_update_buffer");
++                    _updateImage = GetExport<UpdateImageFn>(handle, "ryu_vulkan_descriptors_update_image");
++                    _filterRedundantBuffers = GetExport<FilterRedundantBuffersFn>(handle, "ryu_vulkan_descriptors_filter_redundant_buffers");
++                    _filterRedundantImages = GetExport<FilterRedundantImagesFn>(handle, "ryu_vulkan_descriptors_filter_redundant_images");
++                    _packTemplateSlice = GetExport<PackTemplateSliceFn>(handle, "ryu_vulkan_descriptors_pack_template_slice");
++                    _commitAll = GetExport<CommitAllFn>(handle, "ryu_vulkan_descriptors_commit_all");
++
++                    _isAvailable = _version != null && _create != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr Create() => _create != null ? _create() : IntPtr.Zero;
++
++        public static void Destroy(IntPtr state) => _destroy?.Invoke(state);
++
++        public static void Reset(IntPtr state) => _reset?.Invoke(state);
++
++        public static bool UpdateBuffer(IntPtr state, uint setType, uint index, ulong bufferHandle, ulong offset, ulong range)
++        {
++            if (_updateBuffer == null || state == IntPtr.Zero)
++            {
++                return false;
++            }
++            return _updateBuffer(state, setType, index, bufferHandle, offset, range) > 0;
++        }
++
++        public static bool UpdateImage(IntPtr state, uint setType, uint index, ulong samplerHandle, ulong imageViewHandle, uint layout)
++        {
++            if (_updateImage == null || state == IntPtr.Zero)
++            {
++                return false;
++            }
++            return _updateImage(state, setType, index, samplerHandle, imageViewHandle, layout) > 0;
++        }
++
++        public static int FilterRedundantBuffers(IntPtr state, uint setType, Span<uint> outIndices, Span<NativeDescriptorBufferInfo> outInfos, out int count)
++        {
++            count = 0;
++            if (_filterRedundantBuffers == null || state == IntPtr.Zero)
++            {
++                return -1;
++            }
++
++            nuint written = 0;
++            fixed (uint* pIdx = outIndices)
++            fixed (NativeDescriptorBufferInfo* pInfo = outInfos)
++            {
++                int res = _filterRedundantBuffers(state, setType, pIdx, pInfo, (nuint)outIndices.Length, &written);
++                count = (int)written;
++                return res;
++            }
++        }
++
++        public static int FilterRedundantImages(IntPtr state, uint setType, Span<uint> outIndices, Span<NativeDescriptorImageInfo> outInfos, out int count)
++        {
++            count = 0;
++            if (_filterRedundantImages == null || state == IntPtr.Zero)
++            {
++                return -1;
++            }
++
++            nuint written = 0;
++            fixed (uint* pIdx = outIndices)
++            fixed (NativeDescriptorImageInfo* pInfo = outInfos)
++            {
++                int res = _filterRedundantImages(state, setType, pIdx, pInfo, (nuint)outIndices.Length, &written);
++                count = (int)written;
++                return res;
++            }
++        }
++
++        public static int PackTemplateSlice(IntPtr state, uint setType, uint binding, uint count, Span<byte> outBuf, out int written)
++        {
++            written = 0;
++            if (_packTemplateSlice == null || state == IntPtr.Zero)
++            {
++                return -1;
++            }
++
++            nuint w = 0;
++            fixed (byte* pBuf = outBuf)
++            {
++                int res = _packTemplateSlice(state, setType, binding, count, pBuf, (nuint)outBuf.Length, &w);
++                written = (int)w;
++                return res;
++            }
++        }
++
++        public static void CommitAll(IntPtr state, uint setType) => _commitAll?.Invoke(state, setType);
++    }
++}
+diff --git a/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs b/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
+index da596e23bfef5d7b9195b3971c2bb336a91fa59b..b0483a31d7350d70f3a8430a246e84a802072917 100644
+--- a/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
++++ b/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
+@@ -1,3 +1,4 @@
++using Ryujinx.Common;
+ using Ryujinx.Common.Memory;
+ using Silk.NET.Vulkan;
+ using System;
+@@ -72,11 +73,36 @@ namespace Ryujinx.Graphics.Vulkan
+ 
+         private static bool SequenceEqual<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, uint count) where T : unmanaged
+         {
+-            return MemoryMarshal.Cast<T, byte>(x[..(int)count]).SequenceEqual(MemoryMarshal.Cast<T, byte>(y[..(int)count]));
++            ReadOnlySpan<byte> sx = MemoryMarshal.Cast<T, byte>(x[..(int)count]);
++            ReadOnlySpan<byte> sy = MemoryMarshal.Cast<T, byte>(y[..(int)count]);
++            if (NativeMaxwellState.IsAvailable)
++            {
++                return NativeMaxwellState.PipelineEquals(sx, sy);
++            }
++            return sx.SequenceEqual(sy);
+         }
+ 
+         public override int GetHashCode()
+         {
++            if (NativeMaxwellState.IsAvailable)
++            {
++                ReadOnlySpan<byte> idBytes = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<ulong, byte>(ref Id0), 72);
++                ulong h = NativeMaxwellState.PipelineHash64(idBytes);
++                if (VertexAttributeDescriptionsCount > 0)
++                {
++                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<VertexInputAttributeDescription, byte>(VertexAttributeDescriptions.AsSpan()[..(int)VertexAttributeDescriptionsCount]));
++                }
++                if (VertexBindingDescriptionsCount > 0)
++                {
++                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<VertexInputBindingDescription, byte>(VertexBindingDescriptions.AsSpan()[..(int)VertexBindingDescriptionsCount]));
++                }
++                if (ColorBlendAttachmentStateCount > 0)
++                {
++                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<PipelineColorBlendAttachmentState, byte>(ColorBlendAttachmentState.AsSpan()[..(int)ColorBlendAttachmentStateCount]));
++                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<Format, byte>(AttachmentFormats.AsSpan()[..(int)ColorBlendAttachmentStateCount]));
++                }
++                return (int)h ^ ((int)(h >> 32) * 17);
++            }
+             ulong hash64 = Id0 * 23 ^
+                            Id1 * 23 ^
+                            Id2 * 23 ^
+diff --git a/src/Ryujinx.HLE/FileSystem/NativeRomFsIndexer.cs b/src/Ryujinx.HLE/FileSystem/NativeRomFsIndexer.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..120f0da24aed148074cc42c9f59fa4c488b13d2d
+--- /dev/null
++++ b/src/Ryujinx.HLE/FileSystem/NativeRomFsIndexer.cs
+@@ -0,0 +1,159 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.HLE.FileSystem
++{
++    public static unsafe class NativeRomFsIndexer
++    {
++        private const string LibraryName = "ryu_romfs_indexer";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn(byte* data, nuint len);
++        private delegate void DestroyFn(IntPtr handle);
++        private delegate int FindFileFn(IntPtr handle, byte* path, ulong* outOffset, ulong* outSize);
++        private delegate uint HashFn(uint parent, byte* name, nuint nameLen);
++        private delegate nuint GetFileCountFn(IntPtr handle);
++        private delegate nuint GetDirCountFn(IntPtr handle);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly FindFileFn _findFile;
++        private static readonly HashFn _hash;
++        private static readonly GetFileCountFn _getFileCount;
++        private static readonly GetDirCountFn _getDirCount;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeRomFsIndexer()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_romfs_indexer_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_romfs_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_romfs_destroy");
++                    _findFile = GetExport<FindFileFn>(handle, "ryu_romfs_find_file");
++                    _hash = GetExport<HashFn>(handle, "ryu_romfs_hash");
++                    _getFileCount = GetExport<GetFileCountFn>(handle, "ryu_romfs_get_file_count");
++                    _getDirCount = GetExport<GetDirCountFn>(handle, "ryu_romfs_get_dir_count");
++
++                    _isAvailable = _version != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr Create(ReadOnlySpan<byte> metadata)
++        {
++            if (_create == null || metadata.Length < 0x50)
++            {
++                return IntPtr.Zero;
++            }
++
++            fixed (byte* p = metadata)
++            {
++                return _create(p, (nuint)metadata.Length);
++            }
++        }
++
++        public static void Destroy(IntPtr handle) => _destroy?.Invoke(handle);
++
++        public static bool FindFile(IntPtr handle, string path, out ulong offset, out ulong size)
++        {
++            offset = 0;
++            size = 0;
++            if (_findFile == null || handle == IntPtr.Zero || string.IsNullOrEmpty(path))
++            {
++                return false;
++            }
++
++            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(path + '\0');
++            fixed (byte* pPath = utf8)
++            fixed (ulong* pOff = &offset)
++            fixed (ulong* pSz = &size)
++            {
++                return _findFile(handle, pPath, pOff, pSz) == 1;
++            }
++        }
++
++        public static uint Hash(uint parent, ReadOnlySpan<byte> name)
++        {
++            if (_hash != null && !name.IsEmpty)
++            {
++                fixed (byte* p = name)
++                {
++                    return _hash(parent, p, (nuint)name.Length);
++                }
++            }
++
++            // Fallback Switch RomFS polynomial hash
++            uint h = parent ^ 12345678u;
++            for (int i = 0; i < name.Length; i++)
++            {
++                h = ((h >> 5) | (h << 27)) ^ name[i];
++            }
++            return h;
++        }
++
++        public static int GetFileCount(IntPtr handle)
++        {
++            return _getFileCount != null && handle != IntPtr.Zero ? (int)_getFileCount(handle) : 0;
++        }
++
++        public static int GetDirCount(IntPtr handle)
++        {
++            return _getDirCount != null && handle != IntPtr.Zero ? (int)_getDirCount(handle) : 0;
++        }
++    }
++}
+diff --git a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
+index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2dacb7e8b 100644
+--- a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
++++ b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
+@@ -57,6 +57,7 @@ namespace Ryujinx.HLE.FileSystem
+             ReloadKeySet();
+             ModLoader = new ModLoader(); // Should only be created once
+             _romFsByPid = new ConcurrentDictionary<ulong, Stream>();
++            _nativeRomFsByPid = new ConcurrentDictionary<ulong, IntPtr>();
+         }
+ 
+         public void LoadRomFs(ulong pid, string fileName)
+@@ -69,6 +70,60 @@ namespace Ryujinx.HLE.FileSystem
+ 
+                 return romfsStream;
+             });
++
++            TryIndexRomFs(pid, romfsStream);
++        }
++
++        private readonly ConcurrentDictionary<ulong, IntPtr> _nativeRomFsByPid;
++
++        private void TryIndexRomFs(ulong pid, Stream romfsStream)
++        {
++            if (NativeRomFsIndexer.IsAvailable && romfsStream.CanSeek && romfsStream.Length >= 0x50)
++            {
++                try
++                {
++                    long pos = romfsStream.Position;
++                    romfsStream.Position = 0;
++                    byte[] headerBuf = new byte[0x50];
++                    if (romfsStream.Read(headerBuf, 0, 0x50) == 0x50)
++                    {
++                        ulong dataOffset = BitConverter.ToUInt64(headerBuf, 0x48);
++                        if (dataOffset >= 0x50 && dataOffset <= (ulong)romfsStream.Length && dataOffset <= 32 * 1024 * 1024)
++                        {
++                            romfsStream.Position = 0;
++                            byte[] metaBuf = new byte[(int)dataOffset];
++                            if (romfsStream.Read(metaBuf, 0, (int)dataOffset) == (int)dataOffset)
++                            {
++                                IntPtr nativeHandle = NativeRomFsIndexer.Create(metaBuf);
++                                if (nativeHandle != IntPtr.Zero)
++                                {
++                                    _nativeRomFsByPid.AddOrUpdate(pid, nativeHandle, (p, old) =>
++                                    {
++                                        NativeRomFsIndexer.Destroy(old);
++                                        return nativeHandle;
++                                    });
++                                }
++                            }
++                        }
++                    }
++                    romfsStream.Position = pos;
++                }
++                catch
++                {
++                    // Fallback intact
++                }
++            }
++        }
++
++        public bool TryGetRomFsFileInfo(ulong pid, string path, out ulong offset, out ulong size)
++        {
++            if (_nativeRomFsByPid.TryGetValue(pid, out IntPtr handle) && handle != IntPtr.Zero)
++            {
++                return NativeRomFsIndexer.FindFile(handle, path, out offset, out size);
++            }
++            offset = 0;
++            size = 0;
++            return false;
+         }
+ 
+         public void SetRomFs(ulong pid, Stream romfsStream)
+@@ -79,6 +134,8 @@ namespace Ryujinx.HLE.FileSystem
+ 
+                 return romfsStream;
+             });
++
++            TryIndexRomFs(pid, romfsStream);
+         }
+ 
+         public Stream GetRomFs(ulong pid)
+@@ -671,6 +728,13 @@ namespace Ryujinx.HLE.FileSystem
+                 }
+ 
+                 _romFsByPid.Clear();
++
++                foreach (IntPtr handle in _nativeRomFsByPid.Values)
++                {
++                    NativeRomFsIndexer.Destroy(handle);
++                }
++
++                _nativeRomFsByPid.Clear();
+             }
+         }
+     }
+diff --git a/src/Ryujinx.HLE/HOS/Ipc/NativeIpcParser.cs b/src/Ryujinx.HLE/HOS/Ipc/NativeIpcParser.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..06cf648ecb2bf22b06261b2e9106474e0c94af83
+--- /dev/null
++++ b/src/Ryujinx.HLE/HOS/Ipc/NativeIpcParser.cs
+@@ -0,0 +1,185 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.HLE.HOS.Ipc
++{
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeIpcBufferDesc
++    {
++        public ulong Position;
++        public ulong Size;
++        public byte Flags;
++        private fixed byte _padding[7];
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeIpcPtrBufferDesc
++    {
++        public ulong Position;
++        public ulong Size;
++        public uint Index;
++        private uint _padding;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public struct NativeIpcRecvListBufferDesc
++    {
++        public ulong Position;
++        public ulong Size;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public unsafe struct NativeIpcHandleDescriptor
++    {
++        public uint HasPId;
++        private uint _padding;
++        public ulong PId;
++        public uint CopyCount;
++        public uint MoveCount;
++        public fixed int CopyHandles[16];
++        public fixed int MoveHandles[16];
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    public unsafe struct NativeParsedIpcMessage
++    {
++        public uint MsgType;
++        public uint HandleDescEnabled;
++        public NativeIpcHandleDescriptor HandleDesc;
++
++        public uint PtrBuffCount;
++        public fixed byte PtrBuffs[16 * 24]; // 16 * sizeof(NativeIpcPtrBufferDesc)
++
++        public uint SendBuffCount;
++        public fixed byte SendBuffs[16 * 24]; // 16 * sizeof(NativeIpcBufferDesc)
++
++        public uint RecvBuffCount;
++        public fixed byte RecvBuffs[16 * 24];
++
++        public uint XchgBuffCount;
++        public fixed byte XchgBuffs[16 * 24];
++
++        public uint RawDataOffset;
++        public uint RawDataLength;
++
++        public uint RecvListCount;
++        private uint _reserved;
++        public fixed byte RecvListBuffs[16 * 16]; // 16 * sizeof(NativeIpcRecvListBufferDesc)
++    }
++
++    public static unsafe class NativeIpcParser
++    {
++        private const string LibraryName = "ryu_ipc_parser";
++
++        private delegate uint VersionFn();
++        private delegate int ParseFn(byte* data, nuint dataLen, long cmdPtr, NativeParsedIpcMessage* @out);
++        private delegate int SerializeCmifFn(
++            NativeParsedIpcMessage* msg,
++            byte* rawData,
++            nuint rawLen,
++            long cmdPtr,
++            ulong recvListAddr,
++            byte* outBuf,
++            nuint outCap,
++            nuint* outLen);
++        private delegate int SerializeTipcFn(
++            NativeParsedIpcMessage* msg,
++            byte* rawData,
++            nuint rawLen,
++            byte* outBuf,
++            nuint outCap,
++            nuint* outLen);
++        private delegate int GetBufferFn(NativeParsedIpcMessage* msg, uint index, ulong* outPos, ulong* outSize);
++
++        private static readonly VersionFn _version;
++        private static readonly ParseFn _parse;
++        private static readonly SerializeCmifFn _serializeCmif;
++        private static readonly SerializeTipcFn _serializeTipc;
++        private static readonly GetBufferFn _getBuffer0x21;
++        private static readonly GetBufferFn _getBuffer0x22;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeIpcParser()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_ipc_version");
++                    _parse = GetExport<ParseFn>(handle, "ryu_ipc_parse");
++                    _serializeCmif = GetExport<SerializeCmifFn>(handle, "ryu_ipc_serialize_cmif");
++                    _serializeTipc = GetExport<SerializeTipcFn>(handle, "ryu_ipc_serialize_tipc");
++                    _getBuffer0x21 = GetExport<GetBufferFn>(handle, "ryu_ipc_get_buffer_0x21");
++                    _getBuffer0x22 = GetExport<GetBufferFn>(handle, "ryu_ipc_get_buffer_0x22");
++
++                    _isAvailable = _version != null && _parse != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static bool TryParse(ReadOnlySpan<byte> data, long cmdPtr, out NativeParsedIpcMessage parsed)
++        {
++            parsed = default;
++            if (!_isAvailable || data.Length < 8)
++            {
++                return false;
++            }
++
++            fixed (byte* pData = data)
++            fixed (NativeParsedIpcMessage* pParsed = &parsed)
++            {
++                return _parse(pData, (nuint)data.Length, cmdPtr, pParsed) == 0;
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs b/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
+index e49efca14d1b6d9f28d9e032b13c93e09c61947c..333cfda17438e6cc78145222633b4ed57b455bf8 100644
+--- a/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
++++ b/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
+@@ -1,4 +1,6 @@
++using System;
+ using System.Collections.Generic;
++using System.Diagnostics;
+ using System.Numerics;
+ 
+ namespace Ryujinx.HLE.HOS.Kernel.Threading
+@@ -11,6 +13,9 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+         private readonly long[] _scheduledPrioritiesPerCore;
+         private readonly long[] _suggestedPrioritiesPerCore;
+ 
++        private readonly IntPtr _nativeState;
++        private readonly Dictionary<ulong, KThread> _threadsByUid = new();
++
+         public KPriorityQueue()
+         {
+             _suggestedThreadsPerPrioPerCore = new LinkedList<KThread>[KScheduler.PrioritiesCount][];
+@@ -30,6 +35,19 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+ 
+             _scheduledPrioritiesPerCore = new long[KScheduler.CpuCoresCount];
+             _suggestedPrioritiesPerCore = new long[KScheduler.CpuCoresCount];
++
++            if (NativeKernelScheduler.IsAvailable)
++            {
++                _nativeState = NativeKernelScheduler.Create();
++            }
++        }
++
++        ~KPriorityQueue()
++        {
++            if (_nativeState != IntPtr.Zero)
++            {
++                NativeKernelScheduler.Destroy(_nativeState);
++            }
+         }
+ 
+         public readonly ref struct KThreadEnumerable
+@@ -121,11 +139,31 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+ 
+         public KThread ScheduledThreadsFirstOrDefault(int core)
+         {
++            if (_nativeState != IntPtr.Zero)
++            {
++                ulong firstUid = NativeKernelScheduler.FirstScheduled(_nativeState, core);
++                if (firstUid != 0 && _threadsByUid.TryGetValue(firstUid, out KThread nativeThread))
++                {
++                    return nativeThread;
++                }
++                return null;
++            }
++
+             return ScheduledThreadsElementAtOrDefault(core, 0);
+         }
+ 
+         public KThread ScheduledThreadsElementAtOrDefault(int core, int index)
+         {
++            if (_nativeState != IntPtr.Zero)
++            {
++                ulong uid = NativeKernelScheduler.ElementAtScheduled(_nativeState, core, index);
++                if (uid != 0 && _threadsByUid.TryGetValue(uid, out KThread nativeThread))
++                {
++                    return nativeThread;
++                }
++                return null;
++            }
++
+             int currentIndex = 0;
+             foreach (KThread scheduledThread in ScheduledThreads(core))
+             {
+@@ -144,6 +182,16 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+ 
+         public KThread ScheduledThreadsWithDynamicPriorityFirstOrDefault(int core, int dynamicPriority)
+         {
++            if (_nativeState != IntPtr.Zero)
++            {
++                ulong uid = NativeKernelScheduler.DynamicPrioFirst(_nativeState, core, dynamicPriority);
++                if (uid != 0 && _threadsByUid.TryGetValue(uid, out KThread nativeThread))
++                {
++                    return nativeThread;
++                }
++                return null;
++            }
++
+             foreach (KThread scheduledThread in ScheduledThreads(core))
+             {
+                 if (scheduledThread.DynamicPriority == dynamicPriority)
+@@ -157,6 +205,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+ 
+         public bool HasScheduledThreads(int core)
+         {
++            if (_nativeState != IntPtr.Zero)
++            {
++                return NativeKernelScheduler.HasScheduled(_nativeState, core);
++            }
++
+             return ScheduledThreadsFirstOrDefault(core) != null;
+         }
+ 
+@@ -197,6 +250,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+             SuggestedQueue(prio, core).AddFirst(thread.SiblingsPerCore[core]);
+ 
+             _suggestedPrioritiesPerCore[core] |= 1L << prio;
++
++            if (_nativeState != IntPtr.Zero)
++            {
++                _threadsByUid[thread.ThreadUid] = thread;
++                NativeKernelScheduler.Suggest(_nativeState, prio, core, thread.ThreadUid);
++            }
+         }
+ 
+         public void Unsuggest(int prio, int core, KThread thread)
+@@ -214,6 +273,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+             {
+                 _suggestedPrioritiesPerCore[core] &= ~(1L << prio);
+             }
++
++            if (_nativeState != IntPtr.Zero)
++            {
++                NativeKernelScheduler.Unsuggest(_nativeState, prio, core, thread.ThreadUid);
++            }
+         }
+ 
+         public void Schedule(int prio, int core, KThread thread)
+@@ -226,6 +290,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+             ScheduledQueue(prio, core).AddLast(thread.SiblingsPerCore[core]);
+ 
+             _scheduledPrioritiesPerCore[core] |= 1L << prio;
++
++            if (_nativeState != IntPtr.Zero)
++            {
++                _threadsByUid[thread.ThreadUid] = thread;
++                NativeKernelScheduler.Schedule(_nativeState, prio, core, thread.ThreadUid);
++            }
+         }
+ 
+         public void SchedulePrepend(int prio, int core, KThread thread)
+@@ -238,6 +308,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+             ScheduledQueue(prio, core).AddFirst(thread.SiblingsPerCore[core]);
+ 
+             _scheduledPrioritiesPerCore[core] |= 1L << prio;
++
++            if (_nativeState != IntPtr.Zero)
++            {
++                _threadsByUid[thread.ThreadUid] = thread;
++                NativeKernelScheduler.SchedulePrepend(_nativeState, prio, core, thread.ThreadUid);
++            }
+         }
+ 
+         public KThread Reschedule(int prio, int core, KThread thread)
+@@ -253,6 +329,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+ 
+             queue.AddLast(thread.SiblingsPerCore[core]);
+ 
++            if (_nativeState != IntPtr.Zero)
++            {
++                NativeKernelScheduler.Reschedule(_nativeState, prio, core, thread.ThreadUid);
++            }
++
+             return queue.First.Value;
+         }
+ 
+@@ -271,6 +352,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
+             {
+                 _scheduledPrioritiesPerCore[core] &= ~(1L << prio);
+             }
++
++            if (_nativeState != IntPtr.Zero)
++            {
++                NativeKernelScheduler.Unschedule(_nativeState, prio, core, thread.ThreadUid);
++            }
+         }
+ 
+         private LinkedList<KThread> SuggestedQueue(int prio, int core)
+diff --git a/src/Ryujinx.HLE/HOS/Kernel/Threading/NativeKernelScheduler.cs b/src/Ryujinx.HLE/HOS/Kernel/Threading/NativeKernelScheduler.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..90846487b027842cdbd2975f9a115d96cd402945
+--- /dev/null
++++ b/src/Ryujinx.HLE/HOS/Kernel/Threading/NativeKernelScheduler.cs
+@@ -0,0 +1,298 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.HLE.HOS.Kernel.Threading
++{
++    public static unsafe class NativeKernelScheduler
++    {
++        private const string LibraryName = "ryu_kernel_scheduler";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn();
++        private delegate void DestroyFn(IntPtr state);
++        private delegate void ResetFn(IntPtr state);
++        private delegate void ScheduleFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate void SchedulePrependFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate void UnscheduleFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate ulong RescheduleFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate void SuggestFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate void UnsuggestFn(IntPtr state, uint prio, uint core, ulong threadId);
++        private delegate void TransferToCoreFn(IntPtr state, uint prio, int srcCore, int dstCore, ulong threadId);
++        private delegate ulong FirstScheduledFn(IntPtr state, uint core);
++        private delegate ulong FirstSuggestedFn(IntPtr state, uint core);
++        private delegate ulong ElementAtScheduledFn(IntPtr state, uint core, uint index);
++        private delegate ulong DynamicPrioFirstFn(IntPtr state, uint core, uint prio);
++        private delegate int HasScheduledFn(IntPtr state, uint core);
++        private delegate int HasSuggestedFn(IntPtr state, uint core);
++        private delegate ulong GetScheduledMaskFn(IntPtr state, uint core);
++        private delegate ulong GetSuggestedMaskFn(IntPtr state, uint core);
++        private delegate uint ExportScheduledFn(IntPtr state, uint core, ulong* outBuf, uint maxCount);
++        private delegate uint ExportSuggestedFn(IntPtr state, uint core, ulong* outBuf, uint maxCount);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly ResetFn _reset;
++        private static readonly ScheduleFn _schedule;
++        private static readonly SchedulePrependFn _schedulePrepend;
++        private static readonly UnscheduleFn _unschedule;
++        private static readonly RescheduleFn _reschedule;
++        private static readonly SuggestFn _suggest;
++        private static readonly UnsuggestFn _unsuggest;
++        private static readonly TransferToCoreFn _transferToCore;
++        private static readonly FirstScheduledFn _firstScheduled;
++        private static readonly FirstSuggestedFn _firstSuggested;
++        private static readonly ElementAtScheduledFn _elementAtScheduled;
++        private static readonly DynamicPrioFirstFn _dynamicPrioFirst;
++        private static readonly HasScheduledFn _hasScheduled;
++        private static readonly HasSuggestedFn _hasSuggested;
++        private static readonly GetScheduledMaskFn _getScheduledMask;
++        private static readonly GetSuggestedMaskFn _getSuggestedMask;
++        private static readonly ExportScheduledFn _exportScheduled;
++        private static readonly ExportSuggestedFn _exportSuggested;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeKernelScheduler()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_scheduler_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_scheduler_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_scheduler_destroy");
++                    _reset = GetExport<ResetFn>(handle, "ryu_scheduler_reset");
++                    _schedule = GetExport<ScheduleFn>(handle, "ryu_scheduler_schedule");
++                    _schedulePrepend = GetExport<SchedulePrependFn>(handle, "ryu_scheduler_schedule_prepend");
++                    _unschedule = GetExport<UnscheduleFn>(handle, "ryu_scheduler_unschedule");
++                    _reschedule = GetExport<RescheduleFn>(handle, "ryu_scheduler_reschedule");
++                    _suggest = GetExport<SuggestFn>(handle, "ryu_scheduler_suggest");
++                    _unsuggest = GetExport<UnsuggestFn>(handle, "ryu_scheduler_unsuggest");
++                    _transferToCore = GetExport<TransferToCoreFn>(handle, "ryu_scheduler_transfer_to_core");
++                    _firstScheduled = GetExport<FirstScheduledFn>(handle, "ryu_scheduler_first_scheduled");
++                    _firstSuggested = GetExport<FirstSuggestedFn>(handle, "ryu_scheduler_first_suggested");
++                    _elementAtScheduled = GetExport<ElementAtScheduledFn>(handle, "ryu_scheduler_element_at_scheduled");
++                    _dynamicPrioFirst = GetExport<DynamicPrioFirstFn>(handle, "ryu_scheduler_dynamic_prio_first");
++                    _hasScheduled = GetExport<HasScheduledFn>(handle, "ryu_scheduler_has_scheduled");
++                    _hasSuggested = GetExport<HasSuggestedFn>(handle, "ryu_scheduler_has_suggested");
++                    _getScheduledMask = GetExport<GetScheduledMaskFn>(handle, "ryu_scheduler_get_scheduled_mask");
++                    _getSuggestedMask = GetExport<GetSuggestedMaskFn>(handle, "ryu_scheduler_get_suggested_mask");
++                    _exportScheduled = GetExport<ExportScheduledFn>(handle, "ryu_scheduler_export_scheduled");
++                    _exportSuggested = GetExport<ExportSuggestedFn>(handle, "ryu_scheduler_export_suggested");
++
++                    _isAvailable = _version != null && _create != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr Create() => _create != null ? _create() : IntPtr.Zero;
++
++        public static void Destroy(IntPtr state) => _destroy?.Invoke(state);
++
++        public static void Reset(IntPtr state) => _reset?.Invoke(state);
++
++        public static void Schedule(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_schedule != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                _schedule(state, (uint)prio, (uint)core, threadId);
++            }
++        }
++
++        public static void SchedulePrepend(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_schedulePrepend != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                _schedulePrepend(state, (uint)prio, (uint)core, threadId);
++            }
++        }
++
++        public static void Unschedule(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_unschedule != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                _unschedule(state, (uint)prio, (uint)core, threadId);
++            }
++        }
++
++        public static ulong Reschedule(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_reschedule != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                return _reschedule(state, (uint)prio, (uint)core, threadId);
++            }
++            return 0;
++        }
++
++        public static void Suggest(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_suggest != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                _suggest(state, (uint)prio, (uint)core, threadId);
++            }
++        }
++
++        public static void Unsuggest(IntPtr state, int prio, int core, ulong threadId)
++        {
++            if (_unsuggest != null && state != IntPtr.Zero && prio >= 0 && core >= 0)
++            {
++                _unsuggest(state, (uint)prio, (uint)core, threadId);
++            }
++        }
++
++        public static void TransferToCore(IntPtr state, int prio, int srcCore, int dstCore, ulong threadId)
++        {
++            if (_transferToCore != null && state != IntPtr.Zero && prio >= 0)
++            {
++                _transferToCore(state, (uint)prio, srcCore, dstCore, threadId);
++            }
++        }
++
++        public static ulong FirstScheduled(IntPtr state, int core)
++        {
++            if (_firstScheduled != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _firstScheduled(state, (uint)core);
++            }
++            return 0;
++        }
++
++        public static ulong FirstSuggested(IntPtr state, int core)
++        {
++            if (_firstSuggested != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _firstSuggested(state, (uint)core);
++            }
++            return 0;
++        }
++
++        public static ulong ElementAtScheduled(IntPtr state, int core, int index)
++        {
++            if (_elementAtScheduled != null && state != IntPtr.Zero && core >= 0 && index >= 0)
++            {
++                return _elementAtScheduled(state, (uint)core, (uint)index);
++            }
++            return 0;
++        }
++
++        public static ulong DynamicPrioFirst(IntPtr state, int core, int prio)
++        {
++            if (_dynamicPrioFirst != null && state != IntPtr.Zero && core >= 0 && prio >= 0)
++            {
++                return _dynamicPrioFirst(state, (uint)core, (uint)prio);
++            }
++            return 0;
++        }
++
++        public static bool HasScheduled(IntPtr state, int core)
++        {
++            if (_hasScheduled != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _hasScheduled(state, (uint)core) != 0;
++            }
++            return false;
++        }
++
++        public static bool HasSuggested(IntPtr state, int core)
++        {
++            if (_hasSuggested != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _hasSuggested(state, (uint)core) != 0;
++            }
++            return false;
++        }
++
++        public static ulong GetScheduledMask(IntPtr state, int core)
++        {
++            if (_getScheduledMask != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _getScheduledMask(state, (uint)core);
++            }
++            return 0;
++        }
++
++        public static ulong GetSuggestedMask(IntPtr state, int core)
++        {
++            if (_getSuggestedMask != null && state != IntPtr.Zero && core >= 0)
++            {
++                return _getSuggestedMask(state, (uint)core);
++            }
++            return 0;
++        }
++
++        public static int ExportScheduled(IntPtr state, int core, Span<ulong> outBuf)
++        {
++            if (_exportScheduled != null && state != IntPtr.Zero && core >= 0 && !outBuf.IsEmpty)
++            {
++                fixed (ulong* p = outBuf)
++                {
++                    return (int)_exportScheduled(state, (uint)core, p, (uint)outBuf.Length);
++                }
++            }
++            return 0;
++        }
++
++        public static int ExportSuggested(IntPtr state, int core, Span<ulong> outBuf)
++        {
++            if (_exportSuggested != null && state != IntPtr.Zero && core >= 0 && !outBuf.IsEmpty)
++            {
++                fixed (ulong* p = outBuf)
++                {
++                    return (int)_exportSuggested(state, (uint)core, p, (uint)outBuf.Length);
++                }
++            }
++            return 0;
++        }
++    }
++}
+diff --git a/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs b/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs
+index 48622a2245369b0da6fd5803ea44e24f94850d4d..deb48b3f9c198d4c19f8035437cb779dfc84ccca 100644
+--- a/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs
++++ b/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs
+@@ -1,3 +1,4 @@
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Graphics.Gpu;
+ using Ryujinx.Graphics.Gpu.Synchronization;
+@@ -138,6 +139,11 @@ namespace Ryujinx.HLE.HOS.Services.Nv.NvDrvServices.NvHostCtrl
+                 //       This allows to keep GPU and CPU in sync when we are slow.
+                 if (_failingCount == FailingCountMax)
+                 {
++                    GameplayAnomalyTracker.RecordAnomaly(
++                        AnomalyCategory.GpuSyncpointTimeout,
++                        "NvHostEvent.Wait",
++                        $"GPU thread lag detected on Fence Id {Fence.Id} (Threshold {Fence.Value}). Enforcing CPU synchronized wait.");
++
+                     Logger.Warning?.Print(LogClass.ServiceNv, "GPU processing thread is too slow, waiting on CPU...");
+ 
+                     Fence.Wait(gpuContext, Timeout.InfiniteTimeSpan);
+diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueConsumer.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueConsumer.cs
+index 68560240b423f9215d3f92d68e7c1a05b7515f67..94128969d87dd99cf70703d895ad15189f0187b3 100644
+--- a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueConsumer.cs
++++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueConsumer.cs
+@@ -59,6 +59,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+                     Core.Slots[bufferItem.Slot].BufferState = BufferState.Acquired;
+                     Core.Slots[bufferItem.Slot].Fence = AndroidFence.NoFence;
+ 
++                    if (Core.NativeQueue != IntPtr.Zero)
++                    {
++                        NativeSurfaceFlingerQueue.SyncSlotState(Core.NativeQueue, bufferItem.Slot, (byte)BufferState.Acquired, Core.Slots[bufferItem.Slot].FrameNumber);
++                    }
++
+                     ulong targetFrameNumber = Core.Slots[bufferItem.Slot].FrameNumber;
+ 
+                     for (int i = 0; i < Core.BufferHistory.Length; i++)
+@@ -199,6 +204,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+                     Core.Slots[slot].BufferState = BufferState.Free;
+                     Core.Slots[slot].Fence = fence;
+ 
++                    if (Core.NativeQueue != IntPtr.Zero)
++                    {
++                        NativeSurfaceFlingerQueue.ReleaseBuffer(Core.NativeQueue, slot);
++                    }
++
+                     listener = Core.ProducerListener;
+                 }
+                 else if (Core.Slots[slot].NeedsCleanupOnRelease)
+diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueCore.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueCore.cs
+index 8399c6d6763a61821a713206f91a9faef8402c53..c7a562947cd5a2aab1335bd1f390fa5e9fa05238 100644
+--- a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueCore.cs
++++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueCore.cs
+@@ -33,6 +33,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+         public uint BufferHistoryPosition;
+         public bool EnableExternalEvent;
+         public int MaxBufferCountCached;
++        public readonly IntPtr NativeQueue;
+ 
+         public readonly object Lock = new();
+ 
+@@ -80,6 +81,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+             BufferHistory = new BufferInfo[BufferHistoryArraySize];
+             EnableExternalEvent = true;
+             MaxBufferCountCached = 0;
++            NativeQueue = NativeSurfaceFlingerQueue.IsAvailable ? NativeSurfaceFlingerQueue.Create((uint)BufferSlotArray.NumBufferSlots) : IntPtr.Zero;
+         }
+ 
+         public int GetMinUndequeuedBufferCountLocked(bool async)
+@@ -224,6 +226,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+             Slots[slot].FrameNumber = uint.MaxValue;
+             Slots[slot].AcquireCalled = false;
+             Slots[slot].Fence.FenceCount = 0;
++
++            if (NativeQueue != IntPtr.Zero)
++            {
++                NativeSurfaceFlingerQueue.SyncSlotState(NativeQueue, slot, (byte)BufferState.Free, uint.MaxValue);
++            }
+         }
+ 
+         public void FreeAllBuffersLocked()
+@@ -337,5 +344,13 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+ 
+             return true;
+         }
++
++        ~BufferQueueCore()
++        {
++            if (NativeQueue != IntPtr.Zero)
++            {
++                NativeSurfaceFlingerQueue.Destroy(NativeQueue);
++            }
++        }
+     }
+ }
+diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueProducer.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueProducer.cs
+index 9afb26c657921fae86768238d9e0b922be1572e0..2f0af0d9f8c3d720582fcb784abbc0961be7193f 100644
+--- a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueProducer.cs
++++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/BufferQueueProducer.cs
+@@ -213,6 +213,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+ 
+                 Core.Slots[slot].BufferState = BufferState.Dequeued;
+ 
++                if (Core.NativeQueue != IntPtr.Zero)
++                {
++                    NativeSurfaceFlingerQueue.SyncSlotState(Core.NativeQueue, slot, (byte)BufferState.Dequeued, Core.Slots[slot].FrameNumber);
++                }
++
+                 Core.UpdateMaxBufferCountCachedLocked(slot);
+ 
+                 fence = Core.Slots[slot].Fence;
+@@ -392,6 +397,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+ 
+                 Core.Slots[slot].Fence = input.Fence;
+                 Core.Slots[slot].BufferState = BufferState.Queued;
++
++                if (Core.NativeQueue != IntPtr.Zero)
++                {
++                    NativeSurfaceFlingerQueue.SyncSlotState(Core.NativeQueue, slot, (byte)BufferState.Queued, Core.Slots[slot].FrameNumber);
++                }
+                 Core.FrameCounter++;
+                 Core.Slots[slot].FrameNumber = Core.FrameCounter;
+                 Core.Slots[slot].QueueTime = TimeSpanType.FromTimeSpan(_tickSource.ElapsedTime);
+@@ -509,6 +519,11 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+                 Core.Slots[slot].BufferState = BufferState.Free;
+                 Core.Slots[slot].FrameNumber = 0;
+                 Core.Slots[slot].Fence = fence;
++
++                if (Core.NativeQueue != IntPtr.Zero)
++                {
++                    NativeSurfaceFlingerQueue.CancelBuffer(Core.NativeQueue, slot);
++                }
+                 Core.SignalDequeueEvent();
+                 Core.SignalWaitBufferFreeEvent();
+             }
+@@ -776,25 +791,45 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+                 int dequeuedCount = 0;
+                 int acquiredCount = 0;
+ 
+-                for (int slot = 0; slot < maxBufferCount; slot++)
++                if (NativeSurfaceFlingerQueue.IsAvailable && Core.NativeQueue != IntPtr.Zero)
+                 {
+-                    switch (Core.Slots[slot].BufferState)
++                    int nativeSlot = NativeSurfaceFlingerQueue.FindFreeSlot(Core.NativeQueue, (uint)maxBufferCount);
++                    if (nativeSlot >= 0 && nativeSlot < maxBufferCount && Core.Slots[nativeSlot].BufferState == BufferState.Free)
+                     {
+-                        case BufferState.Acquired:
+-                            acquiredCount++;
+-                            break;
+-                        case BufferState.Dequeued:
+-                            dequeuedCount++;
+-                            break;
+-                        case BufferState.Free:
+-                            if (freeSlot == BufferSlotArray.InvalidBufferSlot || Core.Slots[slot].FrameNumber < Core.Slots[freeSlot].FrameNumber)
+-                            {
+-                                freeSlot = slot;
+-                            }
++                        freeSlot = nativeSlot;
++                    }
++                }
+ 
+-                            break;
+-                        default:
+-                            break;
++                if (freeSlot == BufferSlotArray.InvalidBufferSlot)
++                {
++                    for (int slot = 0; slot < maxBufferCount; slot++)
++                    {
++                        switch (Core.Slots[slot].BufferState)
++                        {
++                            case BufferState.Acquired:
++                                acquiredCount++;
++                                break;
++                            case BufferState.Dequeued:
++                                dequeuedCount++;
++                                break;
++                            case BufferState.Free:
++                                if (freeSlot == BufferSlotArray.InvalidBufferSlot || Core.Slots[slot].FrameNumber < Core.Slots[freeSlot].FrameNumber)
++                                {
++                                    freeSlot = slot;
++                                }
++
++                                break;
++                            default:
++                                break;
++                        }
++                    }
++                }
++                else
++                {
++                    for (int slot = 0; slot < maxBufferCount; slot++)
++                    {
++                        if (Core.Slots[slot].BufferState == BufferState.Acquired) acquiredCount++;
++                        else if (Core.Slots[slot].BufferState == BufferState.Dequeued) dequeuedCount++;
+                     }
+                 }
+ 
+diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/NativeSurfaceFlingerQueue.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/NativeSurfaceFlingerQueue.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..9eb31809d424f24d214d6f9eede4a2694d0d3ffe
+--- /dev/null
++++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/NativeSurfaceFlingerQueue.cs
+@@ -0,0 +1,205 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
++{
++    public static unsafe class NativeSurfaceFlingerQueue
++    {
++        private const string LibraryName = "ryu_surfaceflinger_queue";
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct QueueItemNative
++        {
++            public int Slot;
++            public uint Transform;
++            public uint ScalingMode;
++            public uint Pad;
++            public ulong FrameNumber;
++            public long Timestamp;
++        }
++
++        [StructLayout(LayoutKind.Sequential)]
++        public struct ParcelHeaderNative
++        {
++            public uint PayloadSize;
++            public uint PayloadOffset;
++            public uint ObjectsSize;
++            public uint ObjectOffset;
++        }
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn(uint maxBuffers);
++        private delegate void DestroyFn(IntPtr q);
++        private delegate void SetMaxBuffersFn(IntPtr q, uint maxBuffers);
++        private delegate int FindFreeSlotFn(IntPtr q, uint maxBuffers);
++        private delegate int DequeueSlotFn(IntPtr q, uint maxBuffers);
++        private delegate int QueueBufferFn(IntPtr q, int slot, ulong frameNumber, long timestamp, uint transform, uint scalingMode);
++        private delegate int AcquireBufferFn(IntPtr q, QueueItemNative* outItem);
++        private delegate int ReleaseBufferFn(IntPtr q, int slot);
++        private delegate int CancelBufferFn(IntPtr q, int slot);
++        private delegate void SyncSlotStateFn(IntPtr q, int slot, byte state, ulong frameNumber);
++        private delegate void GetCountsFn(IntPtr q, uint* outFree, uint* outDequeued, uint* outQueued, uint* outAcquired);
++        private delegate int ParseHeaderFn(byte* buf, nuint len, ParcelHeaderNative* outHeader);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly SetMaxBuffersFn _setMaxBuffers;
++        private static readonly FindFreeSlotFn _findFreeSlot;
++        private static readonly DequeueSlotFn _dequeueSlot;
++        private static readonly QueueBufferFn _queueBuffer;
++        private static readonly AcquireBufferFn _acquireBuffer;
++        private static readonly ReleaseBufferFn _releaseBuffer;
++        private static readonly CancelBufferFn _cancelBuffer;
++        private static readonly SyncSlotStateFn _syncSlotState;
++        private static readonly GetCountsFn _getCounts;
++        private static readonly ParseHeaderFn _parseHeader;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeSurfaceFlingerQueue()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_surfaceflinger_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_sf_queue_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_sf_queue_destroy");
++                    _setMaxBuffers = GetExport<SetMaxBuffersFn>(handle, "ryu_sf_queue_set_max_buffers");
++                    _findFreeSlot = GetExport<FindFreeSlotFn>(handle, "ryu_sf_queue_find_free_slot");
++                    _dequeueSlot = GetExport<DequeueSlotFn>(handle, "ryu_sf_queue_dequeue_slot");
++                    _queueBuffer = GetExport<QueueBufferFn>(handle, "ryu_sf_queue_queue_buffer");
++                    _acquireBuffer = GetExport<AcquireBufferFn>(handle, "ryu_sf_queue_acquire_buffer");
++                    _releaseBuffer = GetExport<ReleaseBufferFn>(handle, "ryu_sf_queue_release_buffer");
++                    _cancelBuffer = GetExport<CancelBufferFn>(handle, "ryu_sf_queue_cancel_buffer");
++                    _syncSlotState = GetExport<SyncSlotStateFn>(handle, "ryu_sf_queue_sync_slot_state");
++                    _getCounts = GetExport<GetCountsFn>(handle, "ryu_sf_queue_get_counts");
++                    _parseHeader = GetExport<ParseHeaderFn>(handle, "ryu_sf_parcel_parse_header");
++
++                    _isAvailable = _version != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr resolved))
++            {
++                return resolved;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public static IntPtr Create(uint maxBuffers) => _create != null ? _create(maxBuffers) : IntPtr.Zero;
++
++        public static void Destroy(IntPtr handle) => _destroy?.Invoke(handle);
++
++        public static void SetMaxBuffers(IntPtr handle, uint maxBuffers)
++        {
++            if (handle != IntPtr.Zero) _setMaxBuffers?.Invoke(handle, maxBuffers);
++        }
++
++        public static int FindFreeSlot(IntPtr handle, uint maxBuffers)
++        {
++            return handle != IntPtr.Zero && _findFreeSlot != null ? _findFreeSlot(handle, maxBuffers) : -1;
++        }
++
++        public static int DequeueSlot(IntPtr handle, uint maxBuffers)
++        {
++            return handle != IntPtr.Zero && _dequeueSlot != null ? _dequeueSlot(handle, maxBuffers) : -1;
++        }
++
++        public static bool QueueBuffer(IntPtr handle, int slot, ulong frameNumber, long timestamp, uint transform = 0, uint scalingMode = 0)
++        {
++            return handle != IntPtr.Zero && _queueBuffer != null && _queueBuffer(handle, slot, frameNumber, timestamp, transform, scalingMode) == 1;
++        }
++
++        public static bool AcquireBuffer(IntPtr handle, out QueueItemNative item)
++        {
++            item = default;
++            if (handle == IntPtr.Zero || _acquireBuffer == null) return false;
++            fixed (QueueItemNative* p = &item)
++            {
++                return _acquireBuffer(handle, p) == 1;
++            }
++        }
++
++        public static bool ReleaseBuffer(IntPtr handle, int slot)
++        {
++            return handle != IntPtr.Zero && _releaseBuffer != null && _releaseBuffer(handle, slot) == 1;
++        }
++
++        public static bool CancelBuffer(IntPtr handle, int slot)
++        {
++            return handle != IntPtr.Zero && _cancelBuffer != null && _cancelBuffer(handle, slot) == 1;
++        }
++
++        public static void SyncSlotState(IntPtr handle, int slot, byte state, ulong frameNumber)
++        {
++            if (handle != IntPtr.Zero) _syncSlotState?.Invoke(handle, slot, state, frameNumber);
++        }
++
++        public static void GetCounts(IntPtr handle, out uint free, out uint dequeued, out uint queued, out uint acquired)
++        {
++            free = 0; dequeued = 0; queued = 0; acquired = 0;
++            if (handle == IntPtr.Zero || _getCounts == null) return;
++            fixed (uint* pf = &free, pd = &dequeued, pq = &queued, pa = &acquired)
++            {
++                _getCounts(handle, pf, pd, pq, pa);
++            }
++        }
++
++        public static bool ParseHeader(ReadOnlySpan<byte> buf, out ParcelHeaderNative header)
++        {
++            header = default;
++            if (buf.Length < 16 || _parseHeader == null) return false;
++            fixed (byte* pBuf = buf)
++            fixed (ParcelHeaderNative* pHeader = &header)
++            {
++                return _parseHeader(pBuf, (nuint)buf.Length, pHeader) == 1;
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
+index 25c89baece1b4c58863b21632af47dade8e31634..c810b0d121b8148404b36fde7aa5263976759426 100644
+--- a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
++++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
+@@ -29,6 +29,10 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
+ 
+         public Parcel(ReadOnlySpan<byte> data)
+         {
++            if (NativeSurfaceFlingerQueue.IsAvailable && data.Length >= 16)
++            {
++                NativeSurfaceFlingerQueue.ParseHeader(data, out _);
++            }
+             _rawDataOwner = MemoryOwner<byte>.RentCopy(data);
+ 
+             _payloadPosition = 0;
+diff --git a/src/Ryujinx.Input/Motion/MotionInput.cs b/src/Ryujinx.Input/Motion/MotionInput.cs
+index 9d781c58a77537eb65d08849ff4c5f87942ab109..e32b3081de2e8a6d5002960a21ea73e654c5f378 100644
+--- a/src/Ryujinx.Input/Motion/MotionInput.cs
++++ b/src/Ryujinx.Input/Motion/MotionInput.cs
+@@ -12,6 +12,7 @@ namespace Ryujinx.Input
+         public Vector3 Rotation { get; set; }
+ 
+         private readonly MotionSensorFilter _filter;
++        private readonly NativeMotionFusion _nativeFilter;
+ 
+         public MotionInput()
+         {
+@@ -20,8 +21,11 @@ namespace Ryujinx.Input
+             Gyroscrope = new Vector3();
+             Rotation = new Vector3();
+ 
+-            // TODO: RE the correct filter.
+             _filter = new MotionSensorFilter(0f);
++            if (NativeMotionFusion.IsAvailable)
++            {
++                _nativeFilter = new NativeMotionFusion(0f);
++            }
+         }
+ 
+         public void Update(Vector3 accel, Vector3 gyro, ulong timestamp, int sensitivity, float deadzone)
+@@ -45,8 +49,17 @@ namespace Ryujinx.Input
+ 
+                 Rotation += deltaGyro;
+ 
+-                _filter.SamplePeriod = deltaTime;
+-                _filter.Update(accel, DegreeToRad(gyro));
++                if (_nativeFilter != null && NativeMotionFusion.IsAvailable)
++                {
++                    _nativeFilter.SetSamplePeriod(deltaTime);
++                    Vector3 radGyro = DegreeToRad(gyro);
++                    _nativeFilter.Update(accel.X, accel.Y, accel.Z, radGyro.X, radGyro.Y, radGyro.Z);
++                }
++                else
++                {
++                    _filter.SamplePeriod = deltaTime;
++                    _filter.Update(accel, DegreeToRad(gyro));
++                }
+             }
+ 
+             TimeStamp = timestamp;
+@@ -54,6 +67,12 @@ namespace Ryujinx.Input
+ 
+         public Matrix4x4 GetOrientation()
+         {
++            if (_nativeFilter != null && NativeMotionFusion.IsAvailable)
++            {
++                _nativeFilter.GetQuaternion(out float x, out float y, out float z, out float w);
++                return Matrix4x4.CreateFromQuaternion(new Quaternion(x, y, z, w));
++            }
++
+             return Matrix4x4.CreateFromQuaternion(_filter.Quaternion);
+         }
+ 
+diff --git a/src/Ryujinx.Input/Motion/NativeMotionFusion.cs b/src/Ryujinx.Input/Motion/NativeMotionFusion.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..9c04504c775ee300f04e61804b1acce67acd2cc8
+--- /dev/null
++++ b/src/Ryujinx.Input/Motion/NativeMotionFusion.cs
+@@ -0,0 +1,170 @@
++using System;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Input.Motion
++{
++    public sealed unsafe class NativeMotionFusion : IDisposable
++    {
++        private const string LibraryName = "ryu_motion_fusion";
++
++        private delegate uint VersionFn();
++        private delegate IntPtr CreateFn(float samplePeriod, float kp, float ki);
++        private delegate void DestroyFn(IntPtr filter);
++        private delegate void ResetFn(IntPtr filter);
++        private delegate void SetPeriodFn(IntPtr filter, float period);
++        private delegate void UpdateFn(IntPtr filter, float ax, float ay, float az, float gx, float gy, float gz);
++        private delegate void GetQuatFn(IntPtr filter, float* outXyzw);
++        private delegate void GetMatrixFn(IntPtr filter, float* outMatrix9);
++
++        private static readonly VersionFn _version;
++        private static readonly CreateFn _create;
++        private static readonly DestroyFn _destroy;
++        private static readonly ResetFn _reset;
++        private static readonly SetPeriodFn _setPeriod;
++        private static readonly UpdateFn _update;
++        private static readonly GetQuatFn _getQuat;
++        private static readonly GetMatrixFn _getMatrix;
++
++        private static readonly bool _isAvailable;
++
++        public static bool IsAvailable => _isAvailable;
++
++        private IntPtr _handle;
++
++        static NativeMotionFusion()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_motion_fusion_version");
++                    _create = GetExport<CreateFn>(handle, "ryu_motion_filter_create");
++                    _destroy = GetExport<DestroyFn>(handle, "ryu_motion_filter_destroy");
++                    _reset = GetExport<ResetFn>(handle, "ryu_motion_filter_reset");
++                    _setPeriod = GetExport<SetPeriodFn>(handle, "ryu_motion_filter_set_sample_period");
++                    _update = GetExport<UpdateFn>(handle, "ryu_motion_filter_update");
++                    _getQuat = GetExport<GetQuatFn>(handle, "ryu_motion_filter_get_quaternion");
++                    _getMatrix = GetExport<GetMatrixFn>(handle, "ryu_motion_filter_get_orientation_matrix");
++
++                    _isAvailable = _version != null && _create != null && _update != null && _version() >= 0x00010000;
++                }
++            }
++            catch
++            {
++                _isAvailable = false;
++            }
++        }
++
++        public NativeMotionFusion(float samplePeriod, float kp = 1.0f, float ki = 0.0f)
++        {
++            if (_isAvailable)
++            {
++                _handle = _create(samplePeriod, kp, ki);
++            }
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            return null;
++        }
++
++        public void SetSamplePeriod(float period)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                _setPeriod(_handle, period);
++            }
++        }
++
++        public void Reset()
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                _reset(_handle);
++            }
++        }
++
++        public void Update(float ax, float ay, float az, float gx, float gy, float gz)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                _update(_handle, ax, ay, az, gx, gy, gz);
++            }
++        }
++
++        public void GetQuaternion(out float x, out float y, out float z, out float w)
++        {
++            x = 0; y = 0; z = 0; w = 1;
++            if (_handle != IntPtr.Zero && _isAvailable)
++            {
++                float* q = stackalloc float[4];
++                _getQuat(_handle, q);
++                x = q[0];
++                y = q[1];
++                z = q[2];
++                w = q[3];
++            }
++        }
++
++        public bool TryGetOrientationMatrix(Span<float> matrix9)
++        {
++            if (_handle != IntPtr.Zero && _isAvailable && matrix9.Length >= 9)
++            {
++                fixed (float* pM = matrix9)
++                {
++                    _getMatrix(_handle, pM);
++                    return true;
++                }
++            }
++            return false;
++        }
++
++        public void Dispose()
++        {
++            if (_handle != IntPtr.Zero)
++            {
++                _destroy(_handle);
++                _handle = IntPtr.Zero;
++            }
++        }
++    }
++}
+diff --git a/src/Ryujinx/Program.cs b/src/Ryujinx/Program.cs
+index 1bd68fa1bb49108e38ee8d546846cccb70c836dc..283538e2191a2eda5c92e752879478276957d4c1 100644
+--- a/src/Ryujinx/Program.cs
++++ b/src/Ryujinx/Program.cs
+@@ -15,6 +15,7 @@ using Ryujinx.Ava.Utilities.SystemInfo;
+ using Ryujinx.Common;
+ using Ryujinx.Common.Configuration;
+ using Ryujinx.Common.GraphicsDriver;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Common.SystemInterop;
+ using Ryujinx.Common.Utilities;
+@@ -473,6 +474,11 @@ namespace Ryujinx.Ava
+ 
+             foreach (Exception e in exceptions)
+             {
++                GameplayAnomalyTracker.RecordAnomaly(
++                    AnomalyCategory.EmulationExceptionCaught,
++                    sender?.GetType()?.AsPrettyString() ?? "Application",
++                    e.Message);
++
+                 string message = $"Unhandled exception caught: {e}";
+                 // ReSharper disable once ConstantConditionalAccessQualifier
+                 if (sender?.GetType()?.AsPrettyString() is { } senderName)
+@@ -491,6 +497,8 @@ namespace Ryujinx.Ava
+ 
+         internal static void Exit()
+         {
++            GameplayAnomalyTracker.DumpDiagnostics();
++
+             DiscordIntegrationModule.Exit();
+ 
+             Logger.Shutdown();
+diff --git a/src/Ryujinx/Systems/Updater/Updater.GitLab.cs b/src/Ryujinx/Systems/Updater/Updater.GitLab.cs
+index 1972e14226462ff74d4b00981f7c554dd1f185e9..a847edf5ea8576a9e442916c6753c559092d72de 100644
+--- a/src/Ryujinx/Systems/Updater/Updater.GitLab.cs
++++ b/src/Ryujinx/Systems/Updater/Updater.GitLab.cs
+@@ -3,6 +3,7 @@ using Ryujinx.Ava.Common.Locale;
+ using Ryujinx.Ava.UI.Helpers;
+ using Ryujinx.Common;
+ using Ryujinx.Common.Helper;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Systems.Update.Client;
+ using Ryujinx.Systems.Update.Common;
+@@ -73,11 +74,20 @@ namespace Ryujinx.Ava.Systems
+ 
+             try
+             {
+-                _versionResponse = await QueryLatestVersionAsync().Then(x => x.Unwrap());
++                var queryTask = QueryLatestVersionAsync();
++                if (queryTask != null)
++                {
++                    _versionResponse = await queryTask.Then(x => x.Unwrap());
++                }
+             }
+             catch (Exception e)
+             {
+-                Logger.Error?.Print(LogClass.Application, $"{e.GetType().AsPrettyString()} thrown when requesting updates: {e.Message}");
++                GameplayAnomalyTracker.RecordAnomaly(
++                    AnomalyCategory.UpdaterNetworkFailure,
++                    "Updater.CheckVersionAsync",
++                    $"Updater check bypassed non-fatal exception: {e.Message}");
++
++                Logger.Notice.Print(LogClass.Application, $"Updater check skipped or offline: {e.Message}");
+ 
+                 _running = false;
+                 return default;
+diff --git a/src/Ryujinx/UI/ViewModels/Input/InputViewModel.cs b/src/Ryujinx/UI/ViewModels/Input/InputViewModel.cs
+index 25e6e3fba72b8f1d34fc4cc79c46e1972794c40b..344c6ada8a23fc126e0fcae7f6a5796c0c7fd83e 100644
+--- a/src/Ryujinx/UI/ViewModels/Input/InputViewModel.cs
++++ b/src/Ryujinx/UI/ViewModels/Input/InputViewModel.cs
+@@ -12,6 +12,7 @@ using Ryujinx.Ava.UI.Models;
+ using Ryujinx.Ava.UI.Models.Input;
+ using Ryujinx.Ava.UI.Windows;
+ using Ryujinx.Common;
++using Ryujinx.Common.Diagnostics;
+ using Ryujinx.Common.Configuration;
+ using Ryujinx.Common.Configuration.Hid;
+ using Ryujinx.Common.Configuration.Hid.Controller;
+@@ -284,7 +285,7 @@ namespace Ryujinx.Ava.UI.ViewModels.Input
+                     return;
+                 }
+ 
+-                IsModified = false;
++            IsModified = false;
+                 _playerId = value;
+                 _isChangeTrackingActive = false;
+ 
+@@ -2066,61 +2067,70 @@ namespace Ryujinx.Ava.UI.ViewModels.Input
+ 
+             if (ProfileName == GetCurrentProfileDefaultName())
+             {
+-                await ContentDialogHelper.CreateErrorDialog(LocaleManager.Instance[LocaleKeys.DialogProfileDefaultProfileOverwriteErrorMessage]);
++                GameplayAnomalyTracker.RecordAnomaly(
++                    AnomalyCategory.ProfileOverwriteAttempt,
++                    "InputViewModel.SaveProfile",
++                    $"User attempted to overwrite read-only profile '{ProfileName}'. Automatically diverting save to 'Custom' profile.");
+ 
+-                return;
++                Logger.Warning?.Print(LogClass.Application,
++                    $"Cannot overwrite default profile '{ProfileName}'. Auto-saving controller configuration to 'Custom' profile instead.");
++
++                ProfileName = "Custom";
++                if (!ProfilesList.Contains("Custom"))
++                {
++                    ProfilesList.Add("Custom");
++                }
++                _originalProfileName = "Custom";
+             }
+-            else
+-            {
+-                bool validFileName = ProfileName.IndexOfAny(Path.GetInvalidFileNameChars()) == -1;
+ 
+-                if (validFileName)
++            bool validFileName = ProfileName.IndexOfAny(Path.GetInvalidFileNameChars()) == -1;
++
++            if (validFileName)
++            {
++                // Delete old profile file if renaming (but keep default profile)
++                if (_originalProfileName != null && !string.Equals(ProfileName, _originalProfileName, StringComparison.Ordinal) && ProfilesList.Contains(_originalProfileName))
+                 {
+-                    // Delete old profile file if renaming (but keep default profile)
+-                    if (_originalProfileName != null && !string.Equals(ProfileName, _originalProfileName, StringComparison.Ordinal) && ProfilesList.Contains(_originalProfileName))
++                    if (!IsDefaultProfileName(_originalProfileName))
+                     {
+-                        if (!IsDefaultProfileName(_originalProfileName))
++                        string oldPath = GetProfilePath(_originalProfileName);
++                        if (File.Exists(oldPath))
+                         {
+-                            string oldPath = GetProfilePath(_originalProfileName);
+-                            if (File.Exists(oldPath))
+-                            {
+-                                File.Delete(oldPath);
+-                                ProfilesList.Remove(_originalProfileName);
+-                            }
+-                            // Only update bindings when renaming from a non-default profile
+-                            ReplaceBoundProfileName(_originalProfileName, ProfileName);
++                            File.Delete(oldPath);
++                            ProfilesList.Remove(_originalProfileName);
+                         }
++                        // Only update bindings when renaming from a non-default profile
++                        ReplaceBoundProfileName(_originalProfileName, ProfileName);
+                     }
++                }
+ 
+-                    string path = GetProfilePath(ProfileName);
+-
+-                    InputConfig config = IsKeyboard
+-                        ? (ConfigViewModel as KeyboardInputViewModel)?.Config.GetConfig()
+-                        : (ConfigViewModel as ControllerInputViewModel)?.Config.GetConfig();
++                string path = GetProfilePath(ProfileName);
+ 
+-                    if (config != null && _controller >= 0 && _controller < Controllers.Count)
+-                    {
+-                        config.ControllerType = Controllers[_controller].Type;
+-                    }
++                InputConfig config = IsKeyboard
++                    ? (ConfigViewModel as KeyboardInputViewModel)?.Config.GetConfig()
++                    : (ConfigViewModel as ControllerInputViewModel)?.Config.GetConfig();
+ 
+-                    await File.WriteAllTextAsync(path, JsonHelper.Serialize(config, _serializerContext.InputConfig));
++                if (config != null && _controller >= 0 && _controller < Controllers.Count)
++                {
++                    config.ControllerType = Controllers[_controller].Type;
++                }
+ 
+-                    // Update profile list
+-                    if (!ProfilesList.Contains(ProfileName))
+-                    {
+-                        ProfilesList.Add(ProfileName);
+-                    }
++                await File.WriteAllTextAsync(path, JsonHelper.Serialize(config, _serializerContext.InputConfig));
+ 
+-                    ChosenProfile = ProfileName;
+-                    _originalProfileName = ProfileName;
+-                }
+-                else
++                // Update profile list
++                if (!ProfilesList.Contains(ProfileName))
+                 {
+-                    await ContentDialogHelper.CreateErrorDialog(LocaleManager.Instance[LocaleKeys.DialogProfileInvalidProfileNameErrorMessage]);
++                    ProfilesList.Add(ProfileName);
+                 }
+ 
+-                IsModified = false;
++                ChosenProfile = ProfileName;
++                _originalProfileName = ProfileName;
++            }
++            else
++            {
++                await ContentDialogHelper.CreateErrorDialog(LocaleManager.Instance[LocaleKeys.DialogProfileInvalidProfileNameErrorMessage]);
+             }
++
++            IsModified = false;
+         }
+ 
+         public async void RemoveProfile()

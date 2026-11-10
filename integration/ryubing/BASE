@@ -1,0 +1,5 @@
+# Upstream Ryubing revision the integration patch applies to.
+RYUBING_REPO=https://git.ryujinx.app/projects/Ryubing.git
+RYUBING_TAG=Canary-1.3.352
+RYUBING_COMMIT=a61a42681119bf15fe8f3297677ae48bda83e70f
+RYUBING_VERSION=1.3.352

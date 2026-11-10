@@ -10,3 +10,6 @@
 *.xci
 prod.keys
 title.keys
+/build
+/dist
+/build-package.log
