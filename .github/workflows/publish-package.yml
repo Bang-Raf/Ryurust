@@ -1,0 +1,65 @@
+name: Publish package
+
+# Publishes the Linux package attached to a GitHub Release to GitHub Packages
+# (ghcr.io/<owner>/ryurust:<version>) as an OCI artifact. The files pushed are
+# the exact release assets, so their SHA-256 matches the release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v0.1.0)
+        required: true
+      latest:
+        description: Also tag the package as `latest`
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      LATEST: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || inputs.latest }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: oras-project/setup-oras@v2
+
+      - name: Download release assets
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'ryurust-*-linux_x64.tar.xz' \
+            --pattern 'ryurust-*-linux_x64.tar.xz.sha256' \
+            --dir pkg
+          cd pkg
+          sha256sum -c ./*.sha256
+          ls -l
+
+      - name: Push to GitHub Packages
+        run: |
+          version="${TAG#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ryurust"
+          echo "${{ github.token }}" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+          cd pkg
+          archive="$(ls ryurust-*-linux_x64.tar.xz)"
+          tags="$version"
+          if [ "$LATEST" = "true" ]; then tags="$tags,latest"; fi
+
+          oras push "$image:$tags" \
+            --artifact-type application/vnd.ryurust.package.v1 \
+            --annotation "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --annotation "org.opencontainers.image.title=Ryurust $version" \
+            --annotation "org.opencontainers.image.description=Ryubing with Ryurust native libraries, Linux x86_64. Pull with: oras pull $image:$version" \
+            --annotation "org.opencontainers.image.version=$version" \
+            --annotation "org.opencontainers.image.licenses=MIT" \
+            "$archive:application/x-xz" \
+            "$archive.sha256:text/plain"
+
+          echo "Published $image:$tags" >> "$GITHUB_STEP_SUMMARY"
