@@ -99,6 +99,16 @@ Linux x64 build of Ryubing with the Ryurust libraries enabled
 none are included. How the package is built is described in
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
+The same package is published to GitHub Packages as
+[`ghcr.io/bang-raf/ryurust`](https://github.com/Bang-Raf/Ryurust/pkgs/container/ryurust).
+It's an OCI artifact holding the release `.tar.xz` and its `.sha256`, not a
+runnable container image. Pull it with [ORAS](https://oras.land):
+
+```bash
+oras pull ghcr.io/bang-raf/ryurust:0.1.0
+sha256sum -c ryurust-0.1.0-ryubing-1.3.352-linux_x64.tar.xz.sha256
+```
+
 ## Quick start
 
 Requirements: Rust stable (tested with 1.99.1), x86_64 Linux.

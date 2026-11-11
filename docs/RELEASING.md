@@ -78,6 +78,16 @@ play games.
        --title "Ryurust 0.1.0" --notes-file <notes>
    ```
 
+   Publishing the release triggers
+   [`publish-package.yml`](../.github/workflows/publish-package.yml), which
+   downloads the release assets, checks the SHA-256, and pushes them to
+   `ghcr.io/<owner>/ryurust:<version>` as an OCI artifact. Non-pre-releases
+   are also tagged `latest`. To publish an existing release by hand:
+
+   ```bash
+   gh workflow run publish-package.yml -f tag=v0.1.0 -f latest=false
+   ```
+
 ## Updating the Ryubing base
 
 1. Rebase the integration branch onto the new upstream tag and resolve
