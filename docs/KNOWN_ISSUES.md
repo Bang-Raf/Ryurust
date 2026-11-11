@@ -1,6 +1,6 @@
 # Known Issues
 
-Last reviewed: 2026-11-10.
+Last reviewed: 2026-11-11.
 
 This page lists what is still wrong or unfinished, followed by the issues
 fixed before the first public release (so reviewers know what changed and
@@ -35,6 +35,39 @@ the PR title.
   (see [`DEVELOPMENT.md`](DEVELOPMENT.md)).
 - 26 clippy lints are allowed workspace-wide as tracked debt (see the root
   `Cargo.toml`).
+
+## Gameplay testing
+
+The v0.1.0 Linux package was installed from
+`ghcr.io/bang-raf/ryurust:0.1.0` and played on 2026-11-11 (Fedora 44,
+Intel Core Ultra 7 256V with integrated Arc graphics, firmware 22.5.0).
+
+| Game | Session length | Result |
+| :--- | :--- | :--- |
+| The Legend of Zelda: Tears of the Kingdom v1.4.3 | 4.5 min | No crash, clean stop |
+| The Legend of Zelda: Tears of the Kingdom v1.4.3 | 22 min | No crash, clean stop |
+| Super Mario Odyssey v1.4.1 | 8 min | No crash, clean stop |
+
+What the logs showed:
+
+- The only error lines are
+  `SurfaceFlinger DequeueBuffer: No available buffer slots` followed by
+  `OnTransact: ... DequeueBuffer: Busy`, once per session at the moment the
+  game is stopped. A Ryubing build without Ryurust logs the same pair at
+  shutdown on the same machine, so this is not caused by the Ryurust
+  SurfaceFlinger queue.
+- `ServiceNv Wait: GPU processing thread is too slow` appeared 18 times
+  across the three sessions, all with a cold shader cache.
+
+Limits of this test:
+
+- One machine, two games, 35 minutes in total. No frame-rate or frame-time
+  measurements were taken, and there is no comparison against a build without
+  Ryurust.
+- The C# wrappers don't log whether a native library was loaded, so the logs
+  don't prove that the ten wired subsystems ran the Rust code rather than the
+  C# fallback. The libraries were present in `lib/`, one of the paths the
+  wrappers probe.
 
 ## Fixed before release
 
