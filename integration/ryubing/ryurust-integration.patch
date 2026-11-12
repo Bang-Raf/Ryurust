@@ -2425,7 +2425,7 @@ index 0000000000000000000000000000000000000000..120f0da24aed148074cc42c9f59fa4c4
 +    }
 +}
 diff --git a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
-index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2dacb7e8b 100644
+index 4e0fdf554633684eb31c1775d8cbad3d577ac236..e24d47f8bd087ad53c1176d0eeaaf4dde68bcae9 100644
 --- a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
 +++ b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
 @@ -57,6 +57,7 @@ namespace Ryujinx.HLE.FileSystem
@@ -2436,7 +2436,7 @@ index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2
          }
  
          public void LoadRomFs(ulong pid, string fileName)
-@@ -69,6 +70,60 @@ namespace Ryujinx.HLE.FileSystem
+@@ -69,6 +70,91 @@ namespace Ryujinx.HLE.FileSystem
  
                  return romfsStream;
              });
@@ -2457,22 +2457,53 @@ index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2
 +                    byte[] headerBuf = new byte[0x50];
 +                    if (romfsStream.Read(headerBuf, 0, 0x50) == 0x50)
 +                    {
-+                        ulong dataOffset = BitConverter.ToUInt64(headerBuf, 0x48);
-+                        if (dataOffset >= 0x50 && dataOffset <= (ulong)romfsStream.Length && dataOffset <= 32 * 1024 * 1024)
++                        // The four tables usually sit after the file data, so a prefix of the
++                        // image is not enough. Copy the header and the tables into one compact
++                        // buffer and rewrite the table offsets to point into it. The data offset
++                        // at 0x48 is kept, so the file offsets returned still index the image.
++                        const long MaxTablesSize = 32 * 1024 * 1024;
++                        long total = 0x50;
++                        bool valid = true;
++
++                        for (int i = 0; i < 4; i++)
 +                        {
-+                            romfsStream.Position = 0;
-+                            byte[] metaBuf = new byte[(int)dataOffset];
-+                            if (romfsStream.Read(metaBuf, 0, (int)dataOffset) == (int)dataOffset)
++                            ulong offset = BitConverter.ToUInt64(headerBuf, 0x08 + i * 0x10);
++                            ulong size = BitConverter.ToUInt64(headerBuf, 0x10 + i * 0x10);
++
++                            if (size > MaxTablesSize || offset > (ulong)romfsStream.Length || size > (ulong)romfsStream.Length - offset)
 +                            {
-+                                IntPtr nativeHandle = NativeRomFsIndexer.Create(metaBuf);
-+                                if (nativeHandle != IntPtr.Zero)
++                                valid = false;
++                                break;
++                            }
++
++                            total += (long)size;
++                        }
++
++                        if (valid && total <= MaxTablesSize + 0x50)
++                        {
++                            byte[] metaBuf = new byte[total];
++                            Buffer.BlockCopy(headerBuf, 0, metaBuf, 0, 0x50);
++                            int at = 0x50;
++
++                            for (int i = 0; i < 4 && valid; i++)
++                            {
++                                long offset = (long)BitConverter.ToUInt64(headerBuf, 0x08 + i * 0x10);
++                                int size = (int)BitConverter.ToUInt64(headerBuf, 0x10 + i * 0x10);
++
++                                romfsStream.Position = offset;
++                                romfsStream.ReadExactly(metaBuf, at, size);
++                                BitConverter.TryWriteBytes(metaBuf.AsSpan(0x08 + i * 0x10, 8), (ulong)at);
++                                at += size;
++                            }
++
++                            IntPtr nativeHandle = NativeRomFsIndexer.Create(metaBuf);
++                            if (nativeHandle != IntPtr.Zero)
++                            {
++                                _nativeRomFsByPid.AddOrUpdate(pid, nativeHandle, (p, old) =>
 +                                {
-+                                    _nativeRomFsByPid.AddOrUpdate(pid, nativeHandle, (p, old) =>
-+                                    {
-+                                        NativeRomFsIndexer.Destroy(old);
-+                                        return nativeHandle;
-+                                    });
-+                                }
++                                    NativeRomFsIndexer.Destroy(old);
++                                    return nativeHandle;
++                                });
 +                            }
 +                        }
 +                    }
@@ -2497,7 +2528,7 @@ index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2
          }
  
          public void SetRomFs(ulong pid, Stream romfsStream)
-@@ -79,6 +134,8 @@ namespace Ryujinx.HLE.FileSystem
+@@ -79,6 +165,8 @@ namespace Ryujinx.HLE.FileSystem
  
                  return romfsStream;
              });
@@ -2506,7 +2537,7 @@ index 4e0fdf554633684eb31c1775d8cbad3d577ac236..058420e6e0ba85abe446f8cef47659a2
          }
  
          public Stream GetRomFs(ulong pid)
-@@ -671,6 +728,13 @@ namespace Ryujinx.HLE.FileSystem
+@@ -671,6 +759,13 @@ namespace Ryujinx.HLE.FileSystem
                  }
  
                  _romFsByPid.Clear();
