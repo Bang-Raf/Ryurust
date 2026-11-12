@@ -61,6 +61,66 @@ code, same machine and settings:
 The first alignment-safe rewrite of `ryu-pixel-converter` was 2–2.5× slower;
 it was rewritten with `as_chunks` and now matches the pre-fix speed.
 
+## Changes after v0.1.0 (2026-11-13)
+
+Six crates changed in ways that could affect speed (see "Fixed after v0.1.0"
+in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)). Each was measured against the
+v0.1.0 code on the same machine in the same session, alternating old and new
+(old, new, old, new) so load affects both alike. Same settings as below; load
+average 2.6–3.8. Raw output:
+[`benchmark-results/2026-11-13/`](benchmark-results/2026-11-13) (`<run>.<old|new>.<bench>.raw.txt`).
+⚠ marks rows where the two runs of one side differ by more than 10%.
+
+| Benchmark | v0.1.0 run 1 | v0.1.0 run 2 | Now run 1 | Now run 2 | Δ (mean) |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| `gal_queue/span_pool_insert_consume/4096` | 108.4 ns | 108.8 ns | 107.8 ns | 105.7 ns | -1.6% |
+| `gal_queue/span_pool_insert_consume/64` | 18.3 ns | 18.04 ns | 18.09 ns | 17.8 ns | -1.2% |
+| `gal_queue/spsc_fill_drain/256` | 7.802 µs | 7.838 µs | 7.892 µs | 7.857 µs | +0.7% |
+| `gal_queue/spsc_two_thread_transfer` | 80.03 ns | 86.97 ns | 81.59 ns | 80.84 ns | -2.7% |
+| `interval_tree/find_overlaps/1024` | 10.51 µs | 11.32 µs | 2.33 µs | 2.1 µs | -79.7% ⚠ |
+| `interval_tree/find_overlaps/128` | 1.788 µs | 1.956 µs | 1.861 µs | 1.65 µs | -6.2% ⚠ |
+| `interval_tree/find_overlaps_slice/1024` | 9.327 µs | 10.13 µs | 2.318 µs | 2.11 µs | -77.2% |
+| `interval_tree/find_overlaps_slice/128` | 1.595 µs | 1.743 µs | 1.869 µs | 1.651 µs | +5.5% ⚠ |
+| `interval_tree/insert_shuffled/1024` | 56.9 µs | 58.9 µs | 36.42 µs | 32.13 µs | -40.8% ⚠ |
+| `jit_regalloc/bitset_or/4096bits` | 29.71 ns | 30.06 ns | 29.93 ns | 30.28 ns | +0.7% |
+| `jit_regalloc/linear_scan/2048_sorted` | 28.61 µs | 30.05 µs | 28.98 µs | 29.25 µs | -0.7% |
+| `jit_regalloc/linear_scan/512_sorted` | 6.786 µs | 7.086 µs | 6.862 µs | 6.944 µs | -0.5% |
+| `jit_regalloc/linear_scan/512_unsorted` | 12.21 µs | 13.53 µs | 11.68 µs | 12.06 µs | -7.7% ⚠ |
+| `romfs_indexer/find_file/hit_random_10k_files` | 151.9 µs | 148.9 µs | 175.7 µs | 152.9 µs | +9.3% ⚠ |
+| `romfs_indexer/find_file/miss_random_10k_files` | 63.05 µs | 64.03 µs | 72.19 µs | 64.32 µs | +7.4% ⚠ |
+| `romfs_indexer/from_metadata_bytes/10k_files` | 40.36 µs | 40.39 µs | 42.78 µs | 41.17 µs | +4.0% |
+| `romfs_indexer/reader_find_file/hit_random_10k_files` | 145.9 µs | 145.2 µs | 165.1 µs | 149 µs | +7.9% ⚠ |
+| `tegra_swizzle/deswizzle_par/rgba8_1920x1080` | 169.9 µs | 161.6 µs | 231 µs | 172.3 µs | +21.7% ⚠ |
+| `tegra_swizzle/deswizzle_seq/rgba8_1920x1080` | 577.6 µs | 530.8 µs | 560.8 µs | 590.4 µs | +3.9% |
+| `tegra_swizzle/swizzle_par/rgba8_1920x1080` | 236.5 µs | 221.8 µs | 287.5 µs | 246.3 µs | +16.5% ⚠ |
+| `tegra_swizzle/swizzle_seq/rgba8_1920x1080` | 877.9 µs | 895 µs | 974.4 µs | 878.4 µs | +4.5% ⚠ |
+| `texture_astc/decode_par/4x4_1920x1080` | 2.166 ms | 2.166 ms | 2.361 ms | 2.221 ms | +5.8% |
+| `texture_astc/decode_par/8x8_1920x1080` | 2.446 ms | 2.548 ms | 2.83 ms | 2.852 ms | +13.8% |
+| `texture_astc/decode_seq/4x4_1920x1080` | 9.544 ms | 9.732 ms | 9.295 ms | 9.257 ms | -3.8% |
+| `texture_astc/decode_seq/8x8_1920x1080` | 12.26 ms | 11.68 ms | 14.24 ms | 13.68 ms | +16.6% |
+| `texture_astc/decode_seq_void_extent/4x4_1920x1080` | 3.785 ms | 3.271 ms | 3.519 ms | 3.211 ms | -4.6% ⚠ |
+
+What changed and why:
+
+- `interval_tree`: the sorted array became a balanced interval tree. Queries
+  over 1,024 entries are 4–5x faster and inserts 1.7x. At 128 entries the two
+  are about even (the slice query is within noise of 5% slower).
+- `texture_astc`: decoding now matches the C# decoder bit for bit, which costs
+  time. Timed per block with a separate loop over this benchmark's blocks (not
+  in the raw files), valid blocks are 3–8% slower and invalid blocks 12–35%, because blocks
+  that used to be rejected early now go through the same steps as in C#. This
+  benchmark decodes random blocks, about 94% of which are invalid, so it
+  overstates the cost for real textures. The 4x4 sequential case shows no
+  slowdown here. An earlier version of this change made the parallel decoder
+  2.4x slower (all threads wrote one shared "valid" flag); that was fixed before
+  these runs.
+- `tegra_swizzle`: the out-of-bounds fix only touches rows whose byte width
+  isn't a multiple of 16, which this 1920-pixel RGBA8 surface never has. The
+  sequential paths are within noise; the parallel ones swing ±20% between runs
+  on both sides.
+- `romfs_indexer`, `gal_queue`, `jit_regalloc`: within noise. The RomFS rows
+  have one slow "now" run each; the second runs are within 3%.
+
 ## Reproduce
 
 ```bash

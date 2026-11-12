@@ -1,0 +1,47 @@
+Benchmarking interval_tree/find_overlaps/128
+Benchmarking interval_tree/find_overlaps/128: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps/128: Collecting 30 samples in estimated 2.0008 s (1.1M iterations)
+Benchmarking interval_tree/find_overlaps/128: Analyzing
+interval_tree/find_overlaps/128
+                        time:   [1.7847 µs 1.7884 µs 1.7937 µs]
+                        thrpt:  [35.681 Melem/s 35.786 Melem/s 35.861 Melem/s]
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+Benchmarking interval_tree/find_overlaps_slice/128
+Benchmarking interval_tree/find_overlaps_slice/128: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps_slice/128: Collecting 30 samples in estimated 2.0001 s (1.2M iterations)
+Benchmarking interval_tree/find_overlaps_slice/128: Analyzing
+interval_tree/find_overlaps_slice/128
+                        time:   [1.5921 µs 1.5948 µs 1.5985 µs]
+                        thrpt:  [40.036 Melem/s 40.131 Melem/s 40.198 Melem/s]
+Found 2 outliers among 30 measurements (6.67%)
+  2 (6.67%) high mild
+Benchmarking interval_tree/find_overlaps/1024
+Benchmarking interval_tree/find_overlaps/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps/1024: Collecting 30 samples in estimated 2.0005 s (192k iterations)
+Benchmarking interval_tree/find_overlaps/1024: Analyzing
+interval_tree/find_overlaps/1024
+                        time:   [10.487 µs 10.512 µs 10.539 µs]
+                        thrpt:  [6.0728 Melem/s 6.0885 Melem/s 6.1027 Melem/s]
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) high mild
+  2 (6.67%) high severe
+Benchmarking interval_tree/find_overlaps_slice/1024
+Benchmarking interval_tree/find_overlaps_slice/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps_slice/1024: Collecting 30 samples in estimated 2.0031 s (214k iterations)
+Benchmarking interval_tree/find_overlaps_slice/1024: Analyzing
+interval_tree/find_overlaps_slice/1024
+                        time:   [9.3098 µs 9.3269 µs 9.3504 µs]
+                        thrpt:  [6.8447 Melem/s 6.8619 Melem/s 6.8745 Melem/s]
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+Benchmarking interval_tree/insert_shuffled/1024
+Benchmarking interval_tree/insert_shuffled/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/insert_shuffled/1024: Collecting 30 samples in estimated 2.0068 s (35k iterations)
+Benchmarking interval_tree/insert_shuffled/1024: Analyzing
+interval_tree/insert_shuffled/1024
+                        time:   [56.786 µs 56.896 µs 57.045 µs]
+                        thrpt:  [17.951 Melem/s 17.998 Melem/s 18.033 Melem/s]
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+

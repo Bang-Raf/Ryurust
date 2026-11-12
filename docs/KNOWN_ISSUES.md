@@ -1,6 +1,6 @@
 # Known Issues
 
-Last reviewed: 2026-11-11.
+Last reviewed: 2026-11-13.
 
 This page lists what is still wrong or unfinished, followed by the issues
 fixed before the first public release (so reviewers know what changed and
@@ -20,21 +20,24 @@ the PR title.
 
 | Crate | Problem |
 | :--- | :--- |
-| `ryu-texture-astc` | Partitioned blocks now follow the C# `SelectPartition` port, but there is no golden-output test against Ryujinx's C# decoder yet (needs a .NET environment to generate reference data). `decode_astc_to_rgba8` returns success even when some blocks were invalid (they decode to magenta); the C# decoder reports failure. |
-| `ryu-jit-regalloc` | Two fixed intervals that overlap and demand the same register cannot both be satisfied; both keep it. Spilling picks the current interval and ignores weight / next use. Sorting unsorted input allocates. |
-| `ryu-ipc-parser` | TIPC serialization doesn't encode pointer-buffer (`X`) descriptors, matching the C# implementation; a TIPC message with pointer buffers silently drops them. |
-| `ryu-interval-tree` | `FlatIntervalTree` is a sorted `Vec`: linear-scan queries and O(n) insert/remove. Fine for small caches, not a balanced tree. |
-| `ryu-romfs-indexer` | The hash now matches LibHac, but it hasn't been tested against a real RomFS image. |
+| `ryu-texture-astc` | Invalid blocks are written as opaque magenta; C# leaves those texels as zeros. The status code is the same (failure), so only the texel values differ. Deliberate, but a C# caller that switches to the native decoder will see magenta instead of black. |
+| `ryu-jit-regalloc` | Spill choice uses the furthest interval end (Poletto/Sarkar), not C#'s next-use position plus interval splitting: this crate's intervals carry no use lists and are never split. Fixed intervals with `fixed_reg` outside `0..32` are not tracked (the register masks are `u32`), so conflicts between them go undetected. |
+| `ryu-texture-astc` | Matching C# made decoding slower: about 3–8% per valid block, and 12–35% per invalid block, because blocks that used to be rejected early now go through the same steps as in C#. Real textures are almost all valid blocks; the Criterion benchmark uses random blocks (~94% invalid), so its numbers overstate the cost. See [BENCHMARKS.md](BENCHMARKS.md). |
+| `ryu-interval-tree` | At n = 128 the balanced tree is no faster than the old sorted array, and the slice query may be 5–15% slower (within benchmark noise). From a few hundred entries up it is clearly faster. |
+| `ryu-video-nvdec` | `stride * n` / `height * y_stride` aren't overflow-checked. A wrapped product gives a too-short slice and a panic (the process aborts at the C boundary), not memory corruption. |
+| `ryu-memory-pagetable` | `map_range` / `unmap_range` with a `size` near `u64::MAX` loop over that many pages. No overflow, but effectively a hang; callers must pass real sizes. |
 
 ### Code-quality debt
 
-- Many existing `unsafe` blocks (mostly in FFI layers) still have no
-  `// SAFETY:` comment; new and recently fixed code does.
-- Several FFI functions don't null-check their pointer arguments.
-- Version exports exist in only 16 of 32 crates and aren't uniformly named
-  (see [`DEVELOPMENT.md`](DEVELOPMENT.md)).
-- 26 clippy lints are allowed workspace-wide as tracked debt (see the root
-  `Cargo.toml`).
+- Inside `pub unsafe extern "C" fn` bodies (edition 2021) unsafe operations
+  aren't in their own blocks, so they're covered by the function's
+  `# Safety` doc rather than a per-operation `// SAFETY:` comment. Moving to
+  edition 2024 (`unsafe_op_in_unsafe_fn`) would make that explicit.
+- The C# wrappers don't log whether a native library was loaded, so a log
+  can't show whether the Rust path or the C# fallback ran.
+- `NativeJitRegalloc.cs` has no binding for the new
+  `ryu_regalloc_get_fixed_conflict` export (nothing in Ryubing calls the
+  allocator part of the wrapper yet).
 
 ## Gameplay testing
 
@@ -68,8 +71,77 @@ Limits of this test:
   don't prove that the ten wired subsystems ran the Rust code rather than the
   C# fallback. The libraries were present in `lib/`, one of the paths the
   wrappers probe.
+- Found afterwards: in this build the native RomFS index could never be
+  created (see "Fixed after v0.1.0"), so RomFS lookups in these sessions all
+  used the C# path.
 
-## Fixed before release
+## Fixed after v0.1.0
+
+Found while closing the issues listed as open in v0.1.0. All fixes come with
+regression tests. No exported function was removed or changed its signature
+(checked against the symbols in the v0.1.0 libraries: all 252 still present,
+21 added).
+
+### Crashes and undefined behavior
+
+| Crate | Fix |
+| :--- | :--- |
+| `ryu-tegra-swizzle` | All four `convert_*` functions wrote past the end of the destination for 3-, 6- and 12-byte pixels (the row-tail loop restarted from a rounded-down pixel index). The tail is now copied as one block; output for 1/2/4/8/16-byte pixels is unchanged. |
+| `ryu-gal-queue` | `ryu_spsc_create`: `capacity * element_size` could overflow and allocate a buffer smaller than the slots it hands out; now returns null. `ryu_span_pool_get`: `offset + size` could wrap past the bounds check; now uses `checked_add`. |
+| `ryu-jit-regalloc` | `ryu_regalloc_bitset_or` / `_and_not` created overlapping `&mut` and `&` slices when C# passes the same buffer as `dst` and `src`. That case is now handled explicitly (same results). |
+| `ryu-audio-dsp` | `ryu_dsp_process_command_batch` used `saturating_mul` for `buffer_count * sample_count`, so an overflow built a `usize::MAX`-length slice. Now returns `DSP_STATUS_INVALID_ARGUMENT`. |
+| `ryu-texture-astc` | Panicked on 3D textures whose height isn't a multiple of the block height (integer underflow), on block sizes above 12x12, and on a too-short output buffer. The first now writes nothing for those blocks, like C#; the others return failure. |
+| `ryu-romfs-indexer` | A corrupted image with a cyclic hash chain looped forever. Chain walks are now bounded by the table size. |
+| `ryu-surfaceflinger-queue` | `ryu_sf_parcel_write_header` overflowed `u32` for huge sizes (panic in debug, wrong size in release). Now returns `0`. |
+| `ryu-memory-pagetable` | `map_range` / `unmap_range` overflowed computing the page count for `size` near `u64::MAX`. |
+| `ryu-vulkan-descriptors`, `ryu-texture-bcn`, `ryu-pixel-converter` (tests) | Tests reinterpreted a `Vec<u8>` as a slice of 8-byte-aligned structs, or passed one buffer as both source and destination. Fixed. |
+
+### Incorrect results
+
+| Crate | Fix |
+| :--- | :--- |
+| `ryu-romfs-indexer` | Rejected every image built by LibHac: it assumed the tables come before the file data, but LibHac (and real games) put them after. Found by a new test against an image built with LibHac's `RomFsBuilder` (synthetic content, `tests/fixtures/`). The C# side in Ryubing only passed the bytes before the data, so in v0.1.0 the native RomFS index was never used and lookups always fell back to C#. Both sides are fixed; the C# change is in `integration/ryubing/ryurust-integration.patch`. |
+| `ryu-texture-astc` | Checked byte for byte against the C# `AstcDecoder` with new golden fixtures (`tests/golden/`, plus a 280,000-block run). That found: dual-plane blocks applied the second weight plane to the wrong channel; blocks whose weights use more bits than are left were rejected (C# decodes their colours as zero); two edge cases in the colour-precision search. All fixed. |
+| `ryu-texture-astc` | `decode_astc_to_rgba8` returned success when some blocks were invalid. It now returns failure, like C# `TryDecodeToRgba8` (FFI: `1`). |
+| `ryu-jit-regalloc` | Two overlapping fixed intervals demanding the same register both got it. This is now detected before allocation: `run_pass` returns `usize::MAX`, nothing is allocated, and `ryu_regalloc_get_fixed_conflict` reports the pair. Spilling now picks the non-fixed interval that ends furthest away instead of always the current one. |
+| `ryu-ipc-parser` | `serialize_tipc` silently dropped pointer (X) buffers. TIPC has none (C# asserts there are none), so such a message is now rejected. |
+
+### Performance
+
+| Crate | Fix |
+| :--- | :--- |
+| `ryu-interval-tree` | Was a sorted `Vec` with linear queries and O(n) insert/remove. Now an AVL interval tree in an index arena: O(log n) insert/remove, O(log n + k) typical queries. Checked against a naive model over 50,000 random operations. See [BENCHMARKS.md](BENCHMARKS.md). |
+| `ryu-jit-regalloc` | Sorting unsorted input no longer allocates. |
+
+### FFI and code quality
+
+- Every crate exports `ryu_<crate>_version()`. The older names
+  `ryu_ipc_version`, `ryu_scheduler_version`, `ryu_surfaceflinger_version`
+  and `ryu_nvdec_get_version` stay as aliases.
+- Every pointer-taking export is `unsafe extern "C"`, has a `# Safety` doc,
+  and is tested with null pointers. (All of them already null-checked; the
+  tests now pin that.)
+- `unsafe` blocks have `// SAFETY:` comments.
+- The 26 clippy lints allowed workspace-wide are gone. Two intentional
+  exceptions are allowed locally with a reason: `excessive_precision` in the
+  resampler's coefficient table, and `too_many_arguments` on functions whose
+  arguments mirror a C# or C ABI signature.
+
+### Behavior changes visible to C#
+
+- `ryu_astc_decode_to_rgba8[_parallel]`: returns `1` (was `0`) when any block
+  is invalid. Not called from Ryubing yet.
+- `ryu_regalloc_run_pass`: returns `usize::MAX` (`-1` after the wrapper's
+  `int` cast) on a fixed-register conflict, and spill choices differ. The
+  wrapped `RunPass` has no callers in Ryubing.
+- `ryu_ipc_serialize_tipc`: returns `-2` for a message with pointer buffers.
+- `ryu_romfs_create`: needs the header and all four tables. Passing only the
+  bytes before `data_offset` no longer works for LibHac-layout images (it never
+  did in practice; see above).
+- `ryu_interval_tree_find_overlaps`: entries with the same start come out
+  ordered by end, then value (was unspecified).
+
+## Fixed before v0.1.0
 
 All fixes come with regression tests. No exported `extern "C"` signature
 changed (checked: 253 signatures identical before and after).

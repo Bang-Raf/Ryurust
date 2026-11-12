@@ -1,0 +1,29 @@
+Benchmarking romfs_indexer/find_file/hit_random_10k_files
+Benchmarking romfs_indexer/find_file/hit_random_10k_files: Warming up for 500.00 ms
+Benchmarking romfs_indexer/find_file/hit_random_10k_files: Collecting 30 samples in estimated 2.0656 s (13k iterations)
+Benchmarking romfs_indexer/find_file/hit_random_10k_files: Analyzing
+romfs_indexer/find_file/hit_random_10k_files
+                        time:   [148.62 µs 148.90 µs 149.26 µs]
+                        thrpt:  [6.8606 Melem/s 6.8773 Melem/s 6.8901 Melem/s]
+Benchmarking romfs_indexer/find_file/miss_random_10k_files
+Benchmarking romfs_indexer/find_file/miss_random_10k_files: Warming up for 500.00 ms
+Benchmarking romfs_indexer/find_file/miss_random_10k_files: Collecting 30 samples in estimated 2.0033 s (30k iterations)
+Benchmarking romfs_indexer/find_file/miss_random_10k_files: Analyzing
+romfs_indexer/find_file/miss_random_10k_files
+                        time:   [63.921 µs 64.028 µs 64.185 µs]
+                        thrpt:  [15.954 Melem/s 15.993 Melem/s 16.020 Melem/s]
+Benchmarking romfs_indexer/reader_find_file/hit_random_10k_files
+Benchmarking romfs_indexer/reader_find_file/hit_random_10k_files: Warming up for 500.00 ms
+Benchmarking romfs_indexer/reader_find_file/hit_random_10k_files: Collecting 30 samples in estimated 2.0266 s (13k iterations)
+Benchmarking romfs_indexer/reader_find_file/hit_random_10k_files: Analyzing
+romfs_indexer/reader_find_file/hit_random_10k_files
+                        time:   [145.00 µs 145.25 µs 145.55 µs]
+                        thrpt:  [7.0353 Melem/s 7.0501 Melem/s 7.0621 Melem/s]
+Benchmarking romfs_indexer/from_metadata_bytes/10k_files
+Benchmarking romfs_indexer/from_metadata_bytes/10k_files: Warming up for 500.00 ms
+Benchmarking romfs_indexer/from_metadata_bytes/10k_files: Collecting 30 samples in estimated 2.0137 s (49k iterations)
+Benchmarking romfs_indexer/from_metadata_bytes/10k_files: Analyzing
+romfs_indexer/from_metadata_bytes/10k_files
+                        time:   [40.329 µs 40.388 µs 40.457 µs]
+                        thrpt:  [14.319 GiB/s 14.344 GiB/s 14.365 GiB/s]
+

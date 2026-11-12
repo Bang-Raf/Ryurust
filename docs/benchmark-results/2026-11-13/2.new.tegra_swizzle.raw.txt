@@ -1,0 +1,57 @@
+Benchmarking tegra_swizzle/deswizzle_seq/rgba8_1920x1080
+Benchmarking tegra_swizzle/deswizzle_seq/rgba8_1920x1080: Warming up for 500.00 ms
+Benchmarking tegra_swizzle/deswizzle_seq/rgba8_1920x1080: Collecting 30 samples in estimated 2.1986 s (3720 iterations)
+Benchmarking tegra_swizzle/deswizzle_seq/rgba8_1920x1080: Analyzing
+tegra_swizzle/deswizzle_seq/rgba8_1920x1080
+                        time:   [584.98 µs 590.36 µs 598.42 µs]
+                        thrpt:  [12.909 GiB/s 13.085 GiB/s 13.205 GiB/s]
+                 change:
+                        time:   [-10.517% -2.1689% +4.2203%] (p = 0.68 > 0.05)
+                        thrpt:  [-4.0494% +2.2170% +11.753%]
+                        No change in performance detected.
+Found 3 outliers among 30 measurements (10.00%)
+  1 (3.33%) high mild
+  2 (6.67%) high severe
+Benchmarking tegra_swizzle/deswizzle_par/rgba8_1920x1080
+Benchmarking tegra_swizzle/deswizzle_par/rgba8_1920x1080: Warming up for 500.00 ms
+Benchmarking tegra_swizzle/deswizzle_par/rgba8_1920x1080: Collecting 30 samples in estimated 2.0167 s (13k iterations)
+Benchmarking tegra_swizzle/deswizzle_par/rgba8_1920x1080: Analyzing
+tegra_swizzle/deswizzle_par/rgba8_1920x1080
+                        time:   [166.49 µs 172.34 µs 180.98 µs]
+                        thrpt:  [42.684 GiB/s 44.823 GiB/s 46.398 GiB/s]
+                 change:
+                        time:   [-15.731% -8.6248% -0.9445%] (p = 0.04 < 0.05)
+                        thrpt:  [+0.9535% +9.4389% +18.668%]
+                        Change within noise threshold.
+Found 4 outliers among 30 measurements (13.33%)
+  1 (3.33%) low mild
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+Benchmarking tegra_swizzle/swizzle_seq/rgba8_1920x1080
+Benchmarking tegra_swizzle/swizzle_seq/rgba8_1920x1080: Warming up for 500.00 ms
+Benchmarking tegra_swizzle/swizzle_seq/rgba8_1920x1080: Collecting 30 samples in estimated 2.0603 s (2325 iterations)
+Benchmarking tegra_swizzle/swizzle_seq/rgba8_1920x1080: Analyzing
+tegra_swizzle/swizzle_seq/rgba8_1920x1080
+                        time:   [876.05 µs 878.44 µs 881.90 µs]
+                        thrpt:  [8.7592 GiB/s 8.7938 GiB/s 8.8178 GiB/s]
+                 change:
+                        time:   [+34.408% +36.434% +38.005%] (p = 0.00 < 0.05)
+                        thrpt:  [-27.539% -26.704% -25.599%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+Benchmarking tegra_swizzle/swizzle_par/rgba8_1920x1080
+Benchmarking tegra_swizzle/swizzle_par/rgba8_1920x1080: Warming up for 500.00 ms
+Benchmarking tegra_swizzle/swizzle_par/rgba8_1920x1080: Collecting 30 samples in estimated 2.0910 s (9300 iterations)
+Benchmarking tegra_swizzle/swizzle_par/rgba8_1920x1080: Analyzing
+tegra_swizzle/swizzle_par/rgba8_1920x1080
+                        time:   [233.84 µs 246.33 µs 263.00 µs]
+                        thrpt:  [29.371 GiB/s 31.359 GiB/s 33.034 GiB/s]
+                 change:
+                        time:   [+20.427% +34.264% +50.526%] (p = 0.00 < 0.05)
+                        thrpt:  [-33.566% -25.520% -16.962%]
+                        Performance has regressed.
+Found 4 outliers among 30 measurements (13.33%)
+  1 (3.33%) high mild
+  3 (10.00%) high severe
+

@@ -32,25 +32,22 @@ the Ryubing executable (or into its `lib/` directory) to enable them.
 
 ## Crate conventions
 
-This is the shape crates should have. Where existing crates don't match yet,
-it's noted below; fixing that is welcome work.
+Every crate follows these; new crates must too.
 
 1. **Safe API first.** Public Rust functions take slices and return
    `Result`/values. The safe API is what tests and benchmarks call.
 2. **Thin FFI layer.** An `ffi` module contains `#[no_mangle] pub unsafe
-   extern "C"` functions that check pointers and lengths, then call the safe
-   API. Handles are `Box::into_raw` pointers with a matching `*_destroy`
-   function. *Today:* all 32 crates have an `ffi` module, but several (mostly
-   the audio crates, `ryu-buffer-diff`, `ryu-gal-queue`,
-   `ryu-host1x-syncpoint`) don't null-check pointers.
-3. **Version export.** The C ABI exposes a `*_version() -> u32` function
-   (`0xMMMMmmmm`). C# wrappers refuse to load a library older than the one
-   they were written for. Bump it when you change an exported signature.
-   *Today:* 16 crates export one (the 13 with C# wrappers, plus
-   `ryu-pixel-converter`, `ryu-texture-bcn` and `ryu-video-nvdec`);
-   names aren't uniform yet (`ryu_ipc_version`, `ryu_scheduler_version`,
-   `ryu_nvdec_get_version`). New crates should use
-   `ryu_<crate_name>_version`.
+   extern "C"` functions that null-check pointers and check lengths, then
+   call the safe API. Each has a `# Safety` doc saying what the caller must
+   guarantee, and each `unsafe` block has a `// SAFETY:` comment. Handles are
+   `Box::into_raw` pointers with a matching `*_destroy` function. Every
+   crate's `ffi` tests call each pointer-taking export with null pointers.
+3. **Version export.** Every crate exports `ryu_<crate_name>_version() -> u32`
+   (`0xMMMMmmmm`, e.g. `ryu_audio_fx_version`). C# wrappers refuse to load a
+   library older than the one they were written for. Bump it when you change
+   an exported signature. Four older names are kept as aliases because
+   existing C# code calls them: `ryu_ipc_version`, `ryu_scheduler_version`,
+   `ryu_surfaceflinger_version` and `ryu_nvdec_get_version`.
 4. **`crate-type = ["cdylib", "rlib"]`** so the crate is both a Rust library
    and a loadable shared object.
 
@@ -77,15 +74,14 @@ and SIMD paths, and none have `// SAFETY:` comments yet. New or changed
 `unsafe` code must have one. Adding them to existing code is a welcome
 `refactor/` PR.
 
-### Lint debt
+### Lints
 
-CI runs `cargo clippy --workspace --all-targets -- -D warnings`. The existing
-crates trip about 26 clippy lints (mostly `excessive_precision` in filter
-tables, `missing_safety_doc` and `not_unsafe_ptr_arg_deref` in FFI layers).
-Those lints are allowed in `[workspace.lints.clippy]` in the root
-`Cargo.toml` so that every *other* lint is enforced. To pay some down: delete
-one `allow` line, fix what `cargo clippy` reports, and open a `refactor/` PR.
-If the fix touches a hot path, include benchmark results.
+CI runs `cargo clippy --workspace --all-targets -- -D warnings` with no
+workspace-wide allows. Where a lint is wrong for a specific piece of code
+(coefficient tables copied from C#, functions whose argument list mirrors a C#
+or C ABI signature, a NaN-preserving clamp), it is allowed locally with
+`#[allow(clippy::...)] // <reason>` on that item or file. Add new exceptions the
+same way, never in `Cargo.toml`.
 
 ## Testing
 

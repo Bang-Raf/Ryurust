@@ -1,0 +1,47 @@
+Benchmarking jit_regalloc/linear_scan/512_sorted
+Benchmarking jit_regalloc/linear_scan/512_sorted: Warming up for 500.00 ms
+Benchmarking jit_regalloc/linear_scan/512_sorted: Collecting 30 samples in estimated 2.0002 s (285k iterations)
+Benchmarking jit_regalloc/linear_scan/512_sorted: Analyzing
+jit_regalloc/linear_scan/512_sorted
+                        time:   [6.9355 µs 6.9441 µs 6.9553 µs]
+                        thrpt:  [73.612 Melem/s 73.732 Melem/s 73.824 Melem/s]
+                 change:
+                        time:   [+6.8482% +7.6852% +8.4648%] (p = 0.00 < 0.05)
+                        thrpt:  [-7.8042% -7.1367% -6.4093%]
+                        Performance has regressed.
+Benchmarking jit_regalloc/linear_scan/2048_sorted
+Benchmarking jit_regalloc/linear_scan/2048_sorted: Warming up for 500.00 ms
+Benchmarking jit_regalloc/linear_scan/2048_sorted: Collecting 30 samples in estimated 2.0018 s (67k iterations)
+Benchmarking jit_regalloc/linear_scan/2048_sorted: Analyzing
+jit_regalloc/linear_scan/2048_sorted
+                        time:   [29.222 µs 29.249 µs 29.282 µs]
+                        thrpt:  [69.941 Melem/s 70.021 Melem/s 70.083 Melem/s]
+                 change:
+                        time:   [+6.7625% +7.5838% +8.3254%] (p = 0.00 < 0.05)
+                        thrpt:  [-7.6855% -7.0492% -6.3341%]
+                        Performance has regressed.
+Benchmarking jit_regalloc/linear_scan/512_unsorted
+Benchmarking jit_regalloc/linear_scan/512_unsorted: Warming up for 500.00 ms
+Benchmarking jit_regalloc/linear_scan/512_unsorted: Collecting 30 samples in estimated 2.0043 s (165k iterations)
+Benchmarking jit_regalloc/linear_scan/512_unsorted: Analyzing
+jit_regalloc/linear_scan/512_unsorted
+                        time:   [12.033 µs 12.060 µs 12.094 µs]
+                        thrpt:  [42.335 Melem/s 42.454 Melem/s 42.551 Melem/s]
+                 change:
+                        time:   [+11.933% +12.475% +13.011%] (p = 0.00 < 0.05)
+                        thrpt:  [-11.513% -11.092% -10.661%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high severe
+Benchmarking jit_regalloc/bitset_or/4096bits
+Benchmarking jit_regalloc/bitset_or/4096bits: Warming up for 500.00 ms
+Benchmarking jit_regalloc/bitset_or/4096bits: Collecting 30 samples in estimated 2.0000 s (10M iterations)
+Benchmarking jit_regalloc/bitset_or/4096bits: Analyzing
+jit_regalloc/bitset_or/4096bits
+                        time:   [28.603 ns 30.282 ns 31.319 ns]
+                        thrpt:  [15.225 GiB/s 15.747 GiB/s 16.671 GiB/s]
+                 change:
+                        time:   [-11.523% +4.0957% +22.945%] (p = 0.64 > 0.05)
+                        thrpt:  [-18.663% -3.9345% +13.024%]
+                        No change in performance detected.
+

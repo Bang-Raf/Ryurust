@@ -1,0 +1,66 @@
+Benchmarking interval_tree/find_overlaps/128
+Benchmarking interval_tree/find_overlaps/128: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps/128: Collecting 30 samples in estimated 2.0007 s (1.1M iterations)
+Benchmarking interval_tree/find_overlaps/128: Analyzing
+interval_tree/find_overlaps/128
+                        time:   [1.8573 µs 1.8615 µs 1.8663 µs]
+                        thrpt:  [34.293 Melem/s 34.381 Melem/s 34.458 Melem/s]
+                 change:
+                        time:   [+15.177% +15.481% +15.788%] (p = 0.00 < 0.05)
+                        thrpt:  [-13.635% -13.406% -13.177%]
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  3 (10.00%) high mild
+Benchmarking interval_tree/find_overlaps_slice/128
+Benchmarking interval_tree/find_overlaps_slice/128: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps_slice/128: Collecting 30 samples in estimated 2.0004 s (1.1M iterations)
+Benchmarking interval_tree/find_overlaps_slice/128: Analyzing
+interval_tree/find_overlaps_slice/128
+                        time:   [1.8503 µs 1.8690 µs 1.8908 µs]
+                        thrpt:  [33.847 Melem/s 34.243 Melem/s 34.590 Melem/s]
+                 change:
+                        time:   [+11.542% +13.873% +16.119%] (p = 0.00 < 0.05)
+                        thrpt:  [-13.881% -12.183% -10.348%]
+                        Performance has regressed.
+Found 3 outliers among 30 measurements (10.00%)
+  2 (6.67%) high mild
+  1 (3.33%) high severe
+Benchmarking interval_tree/find_overlaps/1024
+Benchmarking interval_tree/find_overlaps/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps/1024: Collecting 30 samples in estimated 2.0008 s (861k iterations)
+Benchmarking interval_tree/find_overlaps/1024: Analyzing
+interval_tree/find_overlaps/1024
+                        time:   [2.3248 µs 2.3303 µs 2.3364 µs]
+                        thrpt:  [27.392 Melem/s 27.465 Melem/s 27.530 Melem/s]
+                 change:
+                        time:   [+8.0417% +12.534% +15.487%] (p = 0.00 < 0.05)
+                        thrpt:  [-13.410% -11.138% -7.4431%]
+                        Performance has regressed.
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low severe
+  1 (3.33%) high severe
+Benchmarking interval_tree/find_overlaps_slice/1024
+Benchmarking interval_tree/find_overlaps_slice/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/find_overlaps_slice/1024: Collecting 30 samples in estimated 2.0008 s (863k iterations)
+Benchmarking interval_tree/find_overlaps_slice/1024: Analyzing
+interval_tree/find_overlaps_slice/1024
+                        time:   [2.3113 µs 2.3182 µs 2.3247 µs]
+                        thrpt:  [27.530 Melem/s 27.607 Melem/s 27.691 Melem/s]
+                 change:
+                        time:   [+15.153% +15.888% +16.602%] (p = 0.00 < 0.05)
+                        thrpt:  [-14.238% -13.710% -13.159%]
+                        Performance has regressed.
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) low mild
+Benchmarking interval_tree/insert_shuffled/1024
+Benchmarking interval_tree/insert_shuffled/1024: Warming up for 500.00 ms
+Benchmarking interval_tree/insert_shuffled/1024: Collecting 30 samples in estimated 2.0176 s (52k iterations)
+Benchmarking interval_tree/insert_shuffled/1024: Analyzing
+interval_tree/insert_shuffled/1024
+                        time:   [36.343 µs 36.417 µs 36.503 µs]
+                        thrpt:  [28.052 Melem/s 28.119 Melem/s 28.176 Melem/s]
+                 change:
+                        time:   [+19.551% +20.476% +21.438%] (p = 0.00 < 0.05)
+                        thrpt:  [-17.653% -16.996% -16.354%]
+                        Performance has regressed.
+

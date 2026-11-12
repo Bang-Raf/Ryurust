@@ -1,0 +1,44 @@
+Benchmarking texture_astc/decode_seq/4x4_1920x1080
+Benchmarking texture_astc/decode_seq/4x4_1920x1080: Warming up for 500.00 ms
+Benchmarking texture_astc/decode_seq/4x4_1920x1080: Collecting 30 samples in estimated 2.1049 s (210 iterations)
+Benchmarking texture_astc/decode_seq/4x4_1920x1080: Analyzing
+texture_astc/decode_seq/4x4_1920x1080
+                        time:   [9.6794 ms 9.7319 ms 9.7853 ms]
+                        thrpt:  [808.37 MiB/s 812.81 MiB/s 817.22 MiB/s]
+Benchmarking texture_astc/decode_par/4x4_1920x1080
+Benchmarking texture_astc/decode_par/4x4_1920x1080: Warming up for 500.00 ms
+Benchmarking texture_astc/decode_par/4x4_1920x1080: Collecting 30 samples in estimated 2.0112 s (930 iterations)
+Benchmarking texture_astc/decode_par/4x4_1920x1080: Analyzing
+texture_astc/decode_par/4x4_1920x1080
+                        time:   [2.1152 ms 2.1664 ms 2.2328 ms]
+                        thrpt:  [3.4596 GiB/s 3.5657 GiB/s 3.6519 GiB/s]
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) high mild
+  1 (3.33%) high severe
+Benchmarking texture_astc/decode_seq/8x8_1920x1080
+Benchmarking texture_astc/decode_seq/8x8_1920x1080: Warming up for 500.00 ms
+Benchmarking texture_astc/decode_seq/8x8_1920x1080: Collecting 30 samples in estimated 2.1516 s (180 iterations)
+Benchmarking texture_astc/decode_seq/8x8_1920x1080: Analyzing
+texture_astc/decode_seq/8x8_1920x1080
+                        time:   [11.612 ms 11.678 ms 11.746 ms]
+                        thrpt:  [673.44 MiB/s 677.38 MiB/s 681.19 MiB/s]
+Found 1 outliers among 30 measurements (3.33%)
+  1 (3.33%) high mild
+Benchmarking texture_astc/decode_par/8x8_1920x1080
+Benchmarking texture_astc/decode_par/8x8_1920x1080: Warming up for 500.00 ms
+Benchmarking texture_astc/decode_par/8x8_1920x1080: Collecting 30 samples in estimated 2.1399 s (930 iterations)
+Benchmarking texture_astc/decode_par/8x8_1920x1080: Analyzing
+texture_astc/decode_par/8x8_1920x1080
+                        time:   [2.4777 ms 2.5478 ms 2.6466 ms]
+                        thrpt:  [2.9188 GiB/s 3.0319 GiB/s 3.1177 GiB/s]
+Found 2 outliers among 30 measurements (6.67%)
+  1 (3.33%) low mild
+  1 (3.33%) high severe
+Benchmarking texture_astc/decode_seq_void_extent/4x4_1920x1080
+Benchmarking texture_astc/decode_seq_void_extent/4x4_1920x1080: Warming up for 500.00 ms
+Benchmarking texture_astc/decode_seq_void_extent/4x4_1920x1080: Collecting 30 samples in estimated 3.1197 s (930 iterations)
+Benchmarking texture_astc/decode_seq_void_extent/4x4_1920x1080: Analyzing
+texture_astc/decode_seq_void_extent/4x4_1920x1080
+                        time:   [3.2626 ms 3.2706 ms 3.2825 ms]
+                        thrpt:  [2.3533 GiB/s 2.3619 GiB/s 2.3677 GiB/s]
+
