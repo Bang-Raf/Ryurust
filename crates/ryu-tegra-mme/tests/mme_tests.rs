@@ -6,6 +6,7 @@ use std::ptr;
 
 #[test]
 fn test_step1_ffi_null_safety() {
+    // SAFETY: non-null arguments point to live locals; null ones are rejected before use.
     unsafe {
         let mut count = 0usize;
         assert_eq!(
@@ -43,6 +44,7 @@ fn test_step1_ffi_null_safety() {
 
 #[test]
 fn test_step1_zero_length_safety() {
+    // SAFETY: all pointers refer to live locals and the lengths match them.
     unsafe {
         let mut count = 99usize;
         let dummy = [0i32; 4];
@@ -81,7 +83,7 @@ fn test_step2_mme_arithmetic_and_method_send() {
 
     // Opcode 2: Fetch parameter into R3 and send result. Exit flag (0x80).
     // Op: AluReg (0), Asg: FetchAndSend (3), Dst: R3 (3 << 8), Exit: 0x80
-    let op2 = 0 | (3 << 4) | (3 << 8) | 0x80;
+    let op2 = (3 << 4) | (3 << 8) | 0x80;
 
     // Delay slot: NOP (AluReg Add R0 + R0 -> R0)
     let op3 = 0;
@@ -153,8 +155,8 @@ fn test_step2_mme_loop_branching() {
     let count = interp.execute(&code, 0, &[], &[], &mut out_calls);
 
     assert_eq!(count, 5);
-    for i in 0..5 {
-        assert_eq!(out_calls[i].meth_addr, (0x50 + i) as u32);
+    for (i, call) in out_calls.iter().take(5).enumerate() {
+        assert_eq!(call.meth_addr, (0x50 + i) as u32);
     }
 }
 
@@ -170,11 +172,11 @@ fn test_step2_mme_alu_all_operations() {
         // R3 = R2 + 5 = 35
         1 | (1 << 4) | (3 << 8) | (2 << 11) | (5 << 14),
         // R4 = R3 ^ R2
-        0 | (1 << 4) | (4 << 8) | (3 << 11) | (2 << 14) | (8 << 17), // BitwiseExclusiveOr
+        (1 << 4) | (4 << 8) | (3 << 11) | (2 << 14) | (8 << 17), // BitwiseExclusiveOr
         // R5 = R3 & R2
-        0 | (1 << 4) | (5 << 8) | (3 << 11) | (2 << 14) | (10 << 17), // BitwiseAnd
-        0x80,                                                         // Exit
-        0,                                                            // Delay slot
+        (1 << 4) | (5 << 8) | (3 << 11) | (2 << 14) | (10 << 17), // BitwiseAnd
+        0x80,                                                     // Exit
+        0,                                                        // Delay slot
     ];
 
     let mut out_calls = [MmeMethodCall {
@@ -205,10 +207,10 @@ fn test_step2_mme_indirect_draw_dispatch() {
 
     // op2 (Loop Start):
     // Fetch index count from FIFO and send. FetchAndSend (3), Dst: R4
-    let op2 = 0 | (3 << 4) | (4 << 8);
+    let op2 = (3 << 4) | (4 << 8);
 
     // op3: Fetch base vertex and send. FetchAndSend (3), Dst: R5
-    let op3 = 0 | (3 << 4) | (5 << 8);
+    let op3 = (3 << 4) | (5 << 8);
 
     // op4: Decrement R2. AddImmediate R2 + (-1). Asg: Move (1)
     let imm_neg_1 = (-1i32) << 14;
@@ -240,8 +242,8 @@ fn test_step2_mme_indirect_draw_dispatch() {
 
     // 4 draws * 2 sends per draw = 8 method calls
     assert_eq!(count, 8);
-    for i in 0..8 {
-        assert_eq!(out_calls[i].meth_addr, 0x585);
+    for call in &out_calls[..8] {
+        assert_eq!(call.meth_addr, 0x585);
     }
 }
 
@@ -286,6 +288,7 @@ fn test_infinite_loop_macro_terminates_with_default_budget() {
 
     // Same through the C ABI.
     let mut count = usize::MAX;
+    // SAFETY: `code` and `out` are live slices passed with their own lengths.
     let status = unsafe {
         ryu_mme_execute(
             code.as_ptr(),

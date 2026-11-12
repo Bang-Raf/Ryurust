@@ -87,6 +87,13 @@ pub fn deinterlace_motion_adaptive(
     let prev_len = prev_data.len();
     let next_len = next_data.len();
 
+    // Both rows of a pair lie `field_size` bytes apart, so nothing can be written unless
+    // `field_size < data_len`. Bailing out here also keeps the offset arithmetic below from
+    // overflowing for absurd `field_size` values.
+    if field_size >= data_len {
+        return;
+    }
+
     let p_data = data.as_mut_ptr();
     let p_prev = prev_data.as_ptr();
     let p_next = next_data.as_ptr();
@@ -104,6 +111,11 @@ pub fn deinterlace_motion_adaptive(
             continue;
         }
 
+        // SAFETY: the checks above give `offset + width <= data_len`,
+        // `other_offset + width <= data_len` and `ref_offset + width <= prev_len, next_len`,
+        // so every access below (`x`/`px_idx` < `width`) stays inside its slice. The two
+        // `data` rows are `field_size >= width` apart and are only accessed through raw
+        // pointers derived from the same `&mut [u8]`.
         unsafe {
             let curr_row = p_data.add(offset);
             let other_row = p_data.add(other_offset);

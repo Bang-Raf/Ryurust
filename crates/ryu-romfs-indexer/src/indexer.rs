@@ -193,7 +193,10 @@ impl<'a> RomFsReader<'a> {
         let bucket = (hash as usize) % self.dir_bucket_count;
         let mut curr = read_u32_le(self.dir_hash, bucket * 4)?;
 
+        // A chain can't be longer than the table has entries; stops on a cyclic chain.
+        let mut steps_left = self.dir_meta.len() / 24;
         while curr != ROMFS_ENTRY_EMPTY {
+            steps_left = steps_left.checked_sub(1)?;
             let (entry, entry_name) = self.read_dir_entry(curr)?;
             if entry.parent == parent && entry_name == name {
                 return Some(curr);
@@ -209,7 +212,10 @@ impl<'a> RomFsReader<'a> {
         let bucket = (hash as usize) % self.file_bucket_count;
         let mut curr = read_u32_le(self.file_hash, bucket * 4)?;
 
+        // A chain can't be longer than the table has entries; stops on a cyclic chain.
+        let mut steps_left = self.file_meta.len() / 32;
         while curr != ROMFS_ENTRY_EMPTY {
+            steps_left = steps_left.checked_sub(1)?;
             let (entry, entry_name) = self.read_file_entry(curr)?;
             if entry.parent == parent && entry_name == name {
                 return Some(FileInfo {
@@ -339,11 +345,38 @@ pub struct RyuRomFs {
 }
 
 impl RyuRomFs {
+    /// Builds an index from a RomFS image (or a prefix of one).
+    ///
+    /// `bytes` must start at the RomFS header and reach at least to the end of the last
+    /// metadata table. In images written by LibHac's `RomFsBuilder` (and in retail
+    /// images) the file data comes right after the header and the four tables come
+    /// *after* the data, so a prefix cut at `data_offset` is not enough.
+    ///
+    /// Only the header and the four tables are copied; file data is not retained.
     pub fn from_metadata_bytes(bytes: &[u8]) -> Option<Self> {
-        let header = RomFsHeader::parse(bytes)?;
-        let required_len = header.data_offset.min(bytes.len() as u64) as usize;
-        let metadata = bytes[..required_len].to_vec();
-        let layout = TableLayout::parse(&metadata)?;
+        let src = TableLayout::parse(bytes)?;
+
+        // Compact copy: header, then the tables back to back. The ranges in `layout`
+        // index this copy; `layout.header` keeps the image's own offsets.
+        let tables = [src.dir_hash, src.dir_meta, src.file_hash, src.file_meta];
+        let total = tables
+            .iter()
+            .try_fold(ROMFS_HEADER_SIZE, |acc, &(s, e)| acc.checked_add(e - s))?;
+        let mut metadata = Vec::with_capacity(total);
+        metadata.extend_from_slice(&bytes[..ROMFS_HEADER_SIZE]);
+        let mut compact = [(0usize, 0usize); 4];
+        for (dst, &(start, end)) in compact.iter_mut().zip(&tables) {
+            let at = metadata.len();
+            metadata.extend_from_slice(&bytes[start..end]);
+            *dst = (at, metadata.len());
+        }
+        let layout = TableLayout {
+            header: src.header,
+            dir_hash: compact[0],
+            dir_meta: compact[1],
+            file_hash: compact[2],
+            file_meta: compact[3],
+        };
         let (dir_count, file_count) = RomFsReader::with_layout(&metadata, &layout).count_entries();
 
         Some(Self {
@@ -355,6 +388,10 @@ impl RyuRomFs {
     }
 
     /// A reader over the owned metadata (cheap: no header parsing or validation).
+    ///
+    /// Its `data` field is the compact header-plus-tables copy, not the original image,
+    /// so the table offsets in `header` do not index it. Returned file offsets are still
+    /// offsets into the original image.
     #[inline]
     pub fn reader(&self) -> RomFsReader<'_> {
         RomFsReader::with_layout(&self.metadata, &self.layout)

@@ -110,3 +110,15 @@ pub extern "C" fn ryu_texture_view_format_compatible(
         depth_alias != 0,
     ) as i32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // No export of this crate takes a pointer, so there is no null-pointer test.
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_texture_matcher_version(), RYU_TEXTURE_MATCHER_VERSION);
+        assert_eq!(RYU_TEXTURE_MATCHER_VERSION, 0x0001_0000);
+    }
+}

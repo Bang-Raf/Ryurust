@@ -144,6 +144,7 @@ fn ref_process_multi_biquad_filter(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // reference copy of the C# `BiquadFilterHelper` signature
 fn ref_process_double_biquad_filter_and_mix(
     param0: &BiquadFilterParameter,
     param1: &BiquadFilterParameter,
@@ -195,6 +196,7 @@ fn ref_process_double_biquad_filter_and_mix(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // reference copy of the C# `BiquadFilterHelper` signature
 fn ref_process_double_biquad_filter_and_mix_ramp(
     param0: &BiquadFilterParameter,
     param1: &BiquadFilterParameter,
@@ -265,6 +267,8 @@ fn test_step1_struct_layout_and_sizes() {
 
 #[test]
 fn test_step1_ffi_null_and_zero_safety() {
+    // SAFETY: pointers are either null (rejected before use) or point at locals valid for
+    // the 16 samples / single struct passed.
     unsafe {
         let mut state = BiquadFilterState::default();
         let param = BiquadFilterParameter::default();

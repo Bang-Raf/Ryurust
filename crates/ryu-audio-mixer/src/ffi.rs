@@ -8,6 +8,9 @@ pub extern "C" fn ryu_audio_mixer_version() -> u32 {
     RYU_AUDIO_MIXER_VERSION
 }
 
+/// # Safety
+/// `output` must be valid for reads and writes and `input` for reads of `count` floats, and
+/// the two ranges must not overlap.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_audio_mix(
     output: *mut f32,
@@ -26,6 +29,10 @@ pub unsafe extern "C" fn ryu_audio_mix(
     0
 }
 
+/// # Safety
+/// `output` must be valid for reads and writes and `input` for reads of `count` floats, and
+/// the two ranges must not overlap. `out_last_sample` must be null or valid for a write of
+/// one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_audio_mix_ramp(
     output: *mut f32,
@@ -51,6 +58,10 @@ pub unsafe extern "C" fn ryu_audio_mix_ramp(
     0
 }
 
+/// # Safety
+/// `output` must be valid for reads and writes of `sample_count` floats. `inputs` and
+/// `volumes` must be valid for reads of `voice_count` elements; each entry of `inputs` must be
+/// null (voice skipped) or valid for reads of `sample_count` floats not overlapping `output`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_audio_mix_batch(
     output: *mut f32,
@@ -77,6 +88,11 @@ pub unsafe extern "C" fn ryu_audio_mix_batch(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads of `sample_count` floats. `outputs` and `gains` must be
+/// valid for reads of `output_channels` elements; each entry of `outputs` must be null
+/// (channel skipped) or valid for reads and writes of `sample_count` floats, overlapping
+/// neither `input` nor another output channel.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_audio_mix_matrix(
     outputs: *const *mut f32,
@@ -101,4 +117,54 @@ pub unsafe extern "C" fn ryu_audio_mix_matrix(
     }
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_audio_mixer_version(), RYU_AUDIO_MIXER_VERSION);
+        assert_eq!(RYU_AUDIO_MIXER_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(ryu_audio_mix(null_mut(), null(), 4, 1.0), -1);
+            assert_eq!(
+                ryu_audio_mix_ramp(null_mut(), null(), 4, 0.0, 1.0, null_mut()),
+                -1
+            );
+            assert_eq!(ryu_audio_mix_batch(null_mut(), null(), null(), 2, 4), -1);
+            assert_eq!(ryu_audio_mix_matrix(null(), 2, null(), null(), 4), -1);
+        }
+    }
+
+    #[test]
+    fn null_voice_and_channel_entries_are_skipped() {
+        let input = [1.0f32; 4];
+        let mut output = [0.0f32; 4];
+        let inputs: [*const f32; 2] = [null(), input.as_ptr()];
+        let outputs: [*mut f32; 2] = [null_mut(), output.as_mut_ptr()];
+        let gains = [1.0f32; 2];
+        // SAFETY: the pointer tables and `gains` hold 2 entries, and every non-null entry
+        // points at 4 floats that do not overlap the other side of the mix.
+        unsafe {
+            assert_eq!(
+                ryu_audio_mix_batch(output.as_mut_ptr(), inputs.as_ptr(), gains.as_ptr(), 2, 4),
+                0
+            );
+            assert_eq!(output, [1.0; 4]);
+            assert_eq!(
+                ryu_audio_mix_matrix(outputs.as_ptr(), 2, input.as_ptr(), gains.as_ptr(), 4),
+                0
+            );
+            assert_eq!(output, [2.0; 4]);
+        }
+    }
 }

@@ -7,6 +7,16 @@ pub const VIC_STATUS_OK: i32 = 0;
 pub const VIC_STATUS_NULL_POINTER: i32 = -1;
 pub const VIC_STATUS_INVALID_ARGUMENT: i32 = -2;
 
+pub const RYU_VIDEO_VIC_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_video_vic_version() -> u32 {
+    RYU_VIDEO_VIC_VERSION
+}
+
+/// # Safety
+/// `dst` must be valid for reads and writes of `dst_len` pixels and `src` for reads of
+/// `src_len` pixels, without overlapping. `rect` and `matrix` must point to valid values.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_vic_blend_surface(
     dst: *mut VicPixel,
@@ -57,6 +67,9 @@ pub unsafe extern "C" fn ryu_vic_blend_surface(
     }
 }
 
+/// # Safety
+/// `data` must be valid for reads and writes of `data_len` bytes and `prev_data` for reads of
+/// `prev_len` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_vic_deinterlace_weave(
     data: *mut u8,
@@ -82,6 +95,8 @@ pub unsafe extern "C" fn ryu_vic_deinterlace_weave(
     VIC_STATUS_OK
 }
 
+/// # Safety
+/// `data` must be valid for reads and writes of `data_len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_vic_deinterlace_bob(
     data: *mut u8,
@@ -104,6 +119,10 @@ pub unsafe extern "C" fn ryu_vic_deinterlace_bob(
     VIC_STATUS_OK
 }
 
+/// # Safety
+/// `data` must be valid for reads and writes of `data_len` bytes, `prev_data` for reads of
+/// `prev_len` bytes and `next_data` for reads of `next_len` bytes; `data` must overlap
+/// neither of the other two.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_vic_deinterlace_motion_adaptive(
     data: *mut u8,
@@ -137,4 +156,48 @@ pub unsafe extern "C" fn ryu_vic_deinterlace_motion_adaptive(
     );
 
     VIC_STATUS_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_video_vic_version(), RYU_VIDEO_VIC_VERSION);
+        assert_eq!(RYU_VIDEO_VIC_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        const E: i32 = VIC_STATUS_NULL_POINTER;
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(
+                ryu_vic_blend_surface(null_mut(), 16, 4, 4, null(), 16, 4, 4, null(), null()),
+                E
+            );
+            assert_eq!(
+                ryu_vic_deinterlace_weave(null_mut(), 16, null(), 8, 4, 4, true),
+                E
+            );
+            assert_eq!(ryu_vic_deinterlace_bob(null_mut(), 16, 4, 4, true), E);
+            assert_eq!(
+                ryu_vic_deinterlace_motion_adaptive(
+                    null_mut(),
+                    16,
+                    null(),
+                    8,
+                    null(),
+                    8,
+                    4,
+                    4,
+                    true
+                ),
+                E
+            );
+        }
+    }
 }

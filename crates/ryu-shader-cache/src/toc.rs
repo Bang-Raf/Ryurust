@@ -95,7 +95,7 @@ pub fn parse_toc_entries_with_magic(
     let count = entries_bytes.len() / 16;
     let to_copy = count.min(out_entries.len());
 
-    for i in 0..to_copy {
+    for (i, out_entry) in out_entries.iter_mut().enumerate().take(to_copy) {
         let offset = i * 16;
         let entry_slice = &entries_bytes[offset..offset + 16];
 
@@ -103,7 +103,7 @@ pub fn parse_toc_entries_with_magic(
         let uncomp = u32::from_le_bytes(entry_slice[8..12].try_into().unwrap());
         let comp = u32::from_le_bytes(entry_slice[12..16].try_into().unwrap());
 
-        out_entries[i] = OffsetAndSize {
+        *out_entry = OffsetAndSize {
             offset: off,
             uncompressed_size: uncomp,
             compressed_size: comp,

@@ -71,38 +71,33 @@ pub fn decode_bc7_block(block: Block, output: &mut [u32; 16]) {
     let mut endpoints = [RgbaColor32::new(0, 0, 0, 255); 6];
     let mut p_values = [0u8; 6];
 
-    for i in 0..endpoint_count {
-        endpoints[i].r = block.decode(&mut offset, mode_info.color_depth) as i32;
+    for ep in &mut endpoints[..endpoint_count] {
+        ep.r = block.decode(&mut offset, mode_info.color_depth) as i32;
     }
-    for i in 0..endpoint_count {
-        endpoints[i].g = block.decode(&mut offset, mode_info.color_depth) as i32;
+    for ep in &mut endpoints[..endpoint_count] {
+        ep.g = block.decode(&mut offset, mode_info.color_depth) as i32;
     }
-    for i in 0..endpoint_count {
-        endpoints[i].b = block.decode(&mut offset, mode_info.color_depth) as i32;
+    for ep in &mut endpoints[..endpoint_count] {
+        ep.b = block.decode(&mut offset, mode_info.color_depth) as i32;
     }
     if mode_info.alpha_depth != 0 {
-        for i in 0..endpoint_count {
-            endpoints[i].a = block.decode(&mut offset, mode_info.alpha_depth) as i32;
+        for ep in &mut endpoints[..endpoint_count] {
+            ep.a = block.decode(&mut offset, mode_info.alpha_depth) as i32;
         }
     }
 
-    for i in 0..mode_info.p_bits {
-        p_values[i] = block.decode(&mut offset, 1) as u8;
+    for p in &mut p_values[..mode_info.p_bits] {
+        *p = block.decode(&mut offset, 1) as u8;
     }
 
-    for i in 0..endpoint_count {
+    for (i, ep) in endpoints[..endpoint_count].iter_mut().enumerate() {
         let p_bit = if mode_info.p_bits != 0 {
             let p_index = (i * mode_info.p_bits) / endpoint_count;
             p_values[p_index] as i32
         } else {
             -1
         };
-        unquantize(
-            &mut endpoints[i],
-            mode_info.color_depth,
-            mode_info.alpha_depth,
-            p_bit,
-        );
+        unquantize(ep, mode_info.color_depth, mode_info.alpha_depth, p_bit);
     }
 
     let partition_table = &PARTITION_TABLE[mode_info.subset_count - 1][partition];
@@ -121,13 +116,13 @@ pub fn decode_bc7_block(block: Block, output: &mut [u32; 16]) {
 
     let mut alpha_indices = [0u8; 16];
     if mode_info.alpha_index_bit_count != 0 {
-        for i in 0..16 {
+        for (i, alpha_index) in alpha_indices.iter_mut().enumerate() {
             let bit_count = if i != 0 {
                 mode_info.alpha_index_bit_count
             } else {
                 mode_info.alpha_index_bit_count - 1
             };
-            alpha_indices[i] = block.decode(&mut offset, bit_count) as u8;
+            *alpha_index = block.decode(&mut offset, bit_count) as u8;
         }
     }
 
@@ -199,8 +194,8 @@ pub fn decode_bc7_surface(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 16;
     let expected_dst = width * height * 4;
     if src.len() < expected_src {

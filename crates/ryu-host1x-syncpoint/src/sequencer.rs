@@ -97,8 +97,8 @@ impl SequencerInner {
 
     fn drain_flushed(&mut self, dst: &mut [u32]) -> usize {
         let to_drain = self.flushed.len().min(dst.len());
-        for i in 0..to_drain {
-            dst[i] = self.flushed.pop_front().unwrap();
+        for slot in dst.iter_mut().take(to_drain) {
+            *slot = self.flushed.pop_front().unwrap();
         }
         to_drain
     }

@@ -93,12 +93,22 @@ fn test_template_slice_packing() {
     let written = state.pack_template_buffer_slice(SET_STORAGE, 0, 4, &mut dest);
     assert_eq!(written, dest.len());
 
-    let unpacked: &[RyuDescriptorBufferInfo] =
-        unsafe { std::slice::from_raw_parts(dest.as_ptr() as *const RyuDescriptorBufferInfo, 4) };
-    for i in 0..4 {
-        assert_eq!(unpacked[i].buffer_handle, 0x1000 + i as u64);
-        assert_eq!(unpacked[i].offset, i as u64 * 64);
-        assert_eq!(unpacked[i].range, 64);
+    let info_size = std::mem::size_of::<RyuDescriptorBufferInfo>();
+    let unpacked: Vec<RyuDescriptorBufferInfo> = (0..4)
+        .map(|i| {
+            // SAFETY: `dest` holds 4 packed infos; a `Vec<u8>` carries no alignment
+            // guarantee, so each one is read unaligned.
+            unsafe {
+                std::ptr::read_unaligned(
+                    dest.as_ptr().add(i * info_size) as *const RyuDescriptorBufferInfo
+                )
+            }
+        })
+        .collect();
+    for (i, info) in unpacked.iter().enumerate() {
+        assert_eq!(info.buffer_handle, 0x1000 + i as u64);
+        assert_eq!(info.offset, i as u64 * 64);
+        assert_eq!(info.range, 64);
     }
 }
 
@@ -135,6 +145,7 @@ fn test_differential_bit_identical() {
 
 #[test]
 fn test_c_abi_lifecycle() {
+    // SAFETY: `handle` is live until its destroy; buffers are live locals with matching lengths.
     unsafe {
         let handle = ryu_vulkan_descriptors_create();
         assert!(!handle.is_null());

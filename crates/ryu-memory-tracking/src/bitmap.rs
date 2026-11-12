@@ -9,7 +9,10 @@ pub struct AtomicPageBitmap {
     bit_count: usize,
 }
 
+// SAFETY: the only mutable state is the `AtomicU64` words; `bit_count` never changes
+// after construction.
 unsafe impl Send for AtomicPageBitmap {}
+// SAFETY: see above; every `&self` method goes through atomic operations.
 unsafe impl Sync for AtomicPageBitmap {}
 
 impl AtomicPageBitmap {

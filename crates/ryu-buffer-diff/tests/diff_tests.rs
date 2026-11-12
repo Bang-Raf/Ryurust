@@ -40,8 +40,8 @@ fn test_range_diff() {
     let b = vec![0u8; 512];
 
     // Range from 50 to 150
-    for i in 50..=150 {
-        a[i] = (i % 255) as u8 + 1;
+    for (i, byte) in a.iter_mut().enumerate().take(151).skip(50) {
+        *byte = (i % 255) as u8 + 1;
     }
 
     let range = find_dirty_range(&a, &b).expect("should be dirty");
@@ -85,8 +85,8 @@ fn test_differential_verification_against_scalar() {
 
     for (start, end) in test_ranges {
         let mut test_src = src.clone();
-        for i in start..end {
-            test_src[i] ^= 0xAA;
+        for byte in &mut test_src[start..end] {
+            *byte ^= 0xAA;
         }
 
         let scalar_result = find_dirty_range_scalar(&test_src, &dst, size);
@@ -125,6 +125,7 @@ fn test_ffi_c_abi() {
     let mut offset = 0usize;
     let mut length = 0usize;
 
+    // SAFETY: `src`/`dst` are distinct live 8-byte arrays; out-pointers are live locals.
     unsafe {
         assert_eq!(ryu_buffer_is_equal(src.as_ptr(), dst.as_ptr(), 8), 0);
 

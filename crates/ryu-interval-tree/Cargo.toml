@@ -5,7 +5,7 @@ edition = "2021"
 license.workspace = true
 repository.workspace = true
 authors = ["Ryubing Contributors"]
-description = "Sorted-array interval set for texture and buffer cache overlap queries"
+description = "Balanced (AVL, max-end augmented) interval tree for texture and buffer cache overlap queries"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

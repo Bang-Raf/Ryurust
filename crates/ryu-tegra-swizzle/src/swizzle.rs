@@ -11,13 +11,19 @@ pub enum SwizzleError {
     InvalidGobBlocks,
 }
 
+/// # Safety
+/// `src` must be valid for reads and `dst` for writes of 16 bytes, without overlapping.
 #[inline(always)]
 unsafe fn copy_16(dst: *mut u8, src: *const u8) {
+    // SAFETY: forwarded from the caller's contract.
     std::ptr::copy_nonoverlapping(src, dst, 16);
 }
 
+/// # Safety
+/// `src` must be valid for reads and `dst` for writes of `count` bytes, without overlapping.
 #[inline(always)]
 unsafe fn copy_bytes(dst: *mut u8, src: *const u8, count: usize) {
+    // SAFETY: forwarded from the caller's contract.
     std::ptr::copy_nonoverlapping(src, dst, count);
 }
 
@@ -85,19 +91,24 @@ pub fn convert_block_linear_to_linear(
 
     let stride_trunc = align_down(width * bytes_per_pixel, 16);
     let stride_trunc64 = align_down(width * bytes_per_pixel, 64);
-    let x_start = stride_trunc / bytes_per_pixel;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
 
     for y in 0..height {
         let yz_part = layout.compute_yz_part(y, 0);
+        // SAFETY: `y < height`, so `y * stride` lies within the pitch buffer, whose length was
+        // checked against `min_dst_len = (height - 1) * stride + width * bytes_per_pixel`.
         let mut out_ptr = unsafe { dst_ptr.add(y * stride) };
 
         // 64-byte chunks (4x 16-byte SIMD blocks)
         let mut x = 0;
         while x < stride_trunc64 {
             let base_offset = layout.get_offset_64(x, yz_part);
+            // SAFETY: `get_offset_64` of an `x` below the 64-byte-aligned row width addresses a GOB
+            // row whose four 16-byte pieces (+0, +0x20, +0x100, +0x120) lie inside `slice_size`
+            // bytes of the block-linear buffer; the pitch pointer advances by 64 within the row's
+            // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
             unsafe {
                 let off0 = src_ptr.add(base_offset);
                 let off1 = src_ptr.add(base_offset + 0x20);
@@ -117,6 +128,9 @@ pub fn convert_block_linear_to_linear(
         // 16-byte chunks
         while x < stride_trunc {
             let offset = layout.get_offset_16(x, yz_part);
+            // SAFETY: `x < stride_trunc` keeps the 16-byte unit at `get_offset_16` inside
+            // `slice_size` bytes of the block-linear buffer and the pitch pointer inside this row's
+            // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
             unsafe {
                 copy_16(out_ptr, src_ptr.add(offset));
                 out_ptr = out_ptr.add(16);
@@ -124,12 +138,15 @@ pub fn convert_block_linear_to_linear(
             x += 16;
         }
 
-        // Remaining individual pixels
-        for px in x_start..width {
-            let offset = layout.get_offset_pixel(px, yz_part);
+        // Remaining bytes of the row (< 16), all inside one 16-byte block-linear unit.
+        let tail = width * bytes_per_pixel - stride_trunc;
+        if tail != 0 {
+            let offset = layout.get_offset_16(stride_trunc, yz_part);
+            // SAFETY: the pitch pointer is at byte `stride_trunc` of the row and `tail` more bytes
+            // end exactly at `width * bytes_per_pixel`; the unit at `get_offset_16` lies inside
+            // `slice_size` and `(stride_trunc & 0xf) + tail <= 16`. The slices are distinct.
             unsafe {
-                copy_bytes(out_ptr, src_ptr.add(offset), bytes_per_pixel);
-                out_ptr = out_ptr.add(bytes_per_pixel);
+                copy_bytes(out_ptr, src_ptr.add(offset), tail);
             }
         }
     }
@@ -170,19 +187,24 @@ pub fn convert_linear_to_block_linear(
 
     let stride_trunc = align_down(width * bytes_per_pixel, 16);
     let stride_trunc64 = align_down(width * bytes_per_pixel, 64);
-    let x_start = stride_trunc / bytes_per_pixel;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
 
     for y in 0..height {
         let yz_part = layout.compute_yz_part(y, 0);
+        // SAFETY: `y < height`, so `y * stride` lies within the pitch buffer, whose length was
+        // checked against `min_src_len = (height - 1) * stride + width * bytes_per_pixel`.
         let mut in_ptr = unsafe { src_ptr.add(y * stride) };
 
         // 64-byte chunks
         let mut x = 0;
         while x < stride_trunc64 {
             let base_offset = layout.get_offset_64(x, yz_part);
+            // SAFETY: `get_offset_64` of an `x` below the 64-byte-aligned row width addresses a GOB
+            // row whose four 16-byte pieces (+0, +0x20, +0x100, +0x120) lie inside `slice_size`
+            // bytes of the block-linear buffer; the pitch pointer advances by 64 within the row's
+            // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
             unsafe {
                 let off0 = dst_ptr.add(base_offset);
                 let off1 = dst_ptr.add(base_offset + 0x20);
@@ -202,6 +224,9 @@ pub fn convert_linear_to_block_linear(
         // 16-byte chunks
         while x < stride_trunc {
             let offset = layout.get_offset_16(x, yz_part);
+            // SAFETY: `x < stride_trunc` keeps the 16-byte unit at `get_offset_16` inside
+            // `slice_size` bytes of the block-linear buffer and the pitch pointer inside this row's
+            // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
             unsafe {
                 copy_16(dst_ptr.add(offset), in_ptr);
                 in_ptr = in_ptr.add(16);
@@ -209,12 +234,15 @@ pub fn convert_linear_to_block_linear(
             x += 16;
         }
 
-        // Remaining pixels
-        for px in x_start..width {
-            let offset = layout.get_offset_pixel(px, yz_part);
+        // Remaining bytes of the row (< 16), all inside one 16-byte block-linear unit.
+        let tail = width * bytes_per_pixel - stride_trunc;
+        if tail != 0 {
+            let offset = layout.get_offset_16(stride_trunc, yz_part);
+            // SAFETY: the pitch pointer is at byte `stride_trunc` of the row and `tail` more bytes
+            // end exactly at `width * bytes_per_pixel`; the unit at `get_offset_16` lies inside
+            // `slice_size` and `(stride_trunc & 0xf) + tail <= 16`. The slices are distinct.
             unsafe {
-                copy_bytes(dst_ptr.add(offset), in_ptr, bytes_per_pixel);
-                in_ptr = in_ptr.add(bytes_per_pixel);
+                copy_bytes(dst_ptr.add(offset), in_ptr, tail);
             }
         }
     }
@@ -273,8 +301,9 @@ pub fn convert_block_linear_to_linear_parallel(
 
         let stride_trunc = align_down(width * bytes_per_pixel, 16);
         let stride_trunc64 = align_down(width * bytes_per_pixel, 64);
-        let x_start = stride_trunc / bytes_per_pixel;
 
+        // Pointers are passed as `usize` so the closure is `Send`. Concurrent tasks never write
+        // the same bytes (see below) and `dst`/`src` stay borrowed until `for_each` returns.
         let src_ptr_val = src.as_ptr() as usize;
         let dst_ptr_val = dst.as_mut_ptr() as usize;
 
@@ -284,11 +313,17 @@ pub fn convert_block_linear_to_linear_parallel(
             let dst_ptr = dst_ptr_val as *mut u8;
 
             let yz_part = layout.compute_yz_part(y, 0);
+            // SAFETY: `y < height`, so `y * stride` lies within the pitch buffer, whose length was
+            // checked against `min_dst_len = (height - 1) * stride + width * bytes_per_pixel`.
             let mut out_ptr = unsafe { dst_ptr.add(y * stride) };
 
             let mut x = 0;
             while x < stride_trunc64 {
                 let base_offset = layout.get_offset_64(x, yz_part);
+                // SAFETY: `get_offset_64` of an `x` below the 64-byte-aligned row width addresses a GOB
+                // row whose four 16-byte pieces (+0, +0x20, +0x100, +0x120) lie inside `slice_size`
+                // bytes of the block-linear buffer; the pitch pointer advances by 64 within the row's
+                // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
                 unsafe {
                     let off0 = src_ptr.add(base_offset);
                     let off1 = src_ptr.add(base_offset + 0x20);
@@ -307,6 +342,9 @@ pub fn convert_block_linear_to_linear_parallel(
 
             while x < stride_trunc {
                 let offset = layout.get_offset_16(x, yz_part);
+                // SAFETY: `x < stride_trunc` keeps the 16-byte unit at `get_offset_16` inside
+                // `slice_size` bytes of the block-linear buffer and the pitch pointer inside this row's
+                // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
                 unsafe {
                     copy_16(out_ptr, src_ptr.add(offset));
                     out_ptr = out_ptr.add(16);
@@ -314,11 +352,15 @@ pub fn convert_block_linear_to_linear_parallel(
                 x += 16;
             }
 
-            for px in x_start..width {
-                let offset = layout.get_offset_pixel(px, yz_part);
+            // Remaining bytes of the row (< 16), all inside one 16-byte block-linear unit.
+            let tail = width * bytes_per_pixel - stride_trunc;
+            if tail != 0 {
+                let offset = layout.get_offset_16(stride_trunc, yz_part);
+                // SAFETY: the pitch pointer is at byte `stride_trunc` of the row and `tail` more bytes
+                // end exactly at `width * bytes_per_pixel`; the unit at `get_offset_16` lies inside
+                // `slice_size` and `(stride_trunc & 0xf) + tail <= 16`. The slices are distinct.
                 unsafe {
-                    copy_bytes(out_ptr, src_ptr.add(offset), bytes_per_pixel);
-                    out_ptr = out_ptr.add(bytes_per_pixel);
+                    copy_bytes(out_ptr, src_ptr.add(offset), tail);
                 }
             }
         });
@@ -388,14 +430,13 @@ pub fn convert_linear_to_block_linear_parallel(
 
         let stride_trunc = align_down(width * bytes_per_pixel, 16);
         let stride_trunc64 = align_down(width * bytes_per_pixel, 64);
-        let x_start = stride_trunc / bytes_per_pixel;
 
         let src_ptr_val = src.as_ptr() as usize;
         let dst_ptr_val = dst.as_mut_ptr() as usize;
 
         // Parallelize across ROB chunks (multiples of rob_height = gob_blocks_in_y * 8)
         // Each ROB chunk writes to completely disjoint slices of the block-linear output!
-        let num_robs = (height + rob_height - 1) / rob_height;
+        let num_robs = height.div_ceil(rob_height);
 
         (0..num_robs).into_par_iter().for_each(|rob_idx| {
             let y_start = rob_idx * rob_height;
@@ -406,11 +447,17 @@ pub fn convert_linear_to_block_linear_parallel(
 
             for y in y_start..y_end {
                 let yz_part = layout.compute_yz_part(y, 0);
+                // SAFETY: `y < height`, so `y * stride` lies within the pitch buffer, whose length was
+                // checked against `min_src_len = (height - 1) * stride + width * bytes_per_pixel`.
                 let mut in_ptr = unsafe { src_ptr.add(y * stride) };
 
                 let mut x = 0;
                 while x < stride_trunc64 {
                     let base_offset = layout.get_offset_64(x, yz_part);
+                    // SAFETY: `get_offset_64` of an `x` below the 64-byte-aligned row width addresses a GOB
+                    // row whose four 16-byte pieces (+0, +0x20, +0x100, +0x120) lie inside `slice_size`
+                    // bytes of the block-linear buffer; the pitch pointer advances by 64 within the row's
+                    // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
                     unsafe {
                         let off0 = dst_ptr.add(base_offset);
                         let off1 = dst_ptr.add(base_offset + 0x20);
@@ -429,6 +476,9 @@ pub fn convert_linear_to_block_linear_parallel(
 
                 while x < stride_trunc {
                     let offset = layout.get_offset_16(x, yz_part);
+                    // SAFETY: `x < stride_trunc` keeps the 16-byte unit at `get_offset_16` inside
+                    // `slice_size` bytes of the block-linear buffer and the pitch pointer inside this row's
+                    // `width * bytes_per_pixel` bytes. Source and destination are distinct slices.
                     unsafe {
                         copy_16(dst_ptr.add(offset), in_ptr);
                         in_ptr = in_ptr.add(16);
@@ -436,11 +486,15 @@ pub fn convert_linear_to_block_linear_parallel(
                     x += 16;
                 }
 
-                for px in x_start..width {
-                    let offset = layout.get_offset_pixel(px, yz_part);
+                // Remaining bytes of the row (< 16), all inside one 16-byte block-linear unit.
+                let tail = width * bytes_per_pixel - stride_trunc;
+                if tail != 0 {
+                    let offset = layout.get_offset_16(stride_trunc, yz_part);
+                    // SAFETY: the pitch pointer is at byte `stride_trunc` of the row and `tail` more bytes
+                    // end exactly at `width * bytes_per_pixel`; the unit at `get_offset_16` lies inside
+                    // `slice_size` and `(stride_trunc & 0xf) + tail <= 16`. The slices are distinct.
                     unsafe {
-                        copy_bytes(dst_ptr.add(offset), in_ptr, bytes_per_pixel);
-                        in_ptr = in_ptr.add(bytes_per_pixel);
+                        copy_bytes(dst_ptr.add(offset), in_ptr, tail);
                     }
                 }
             }

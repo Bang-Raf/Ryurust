@@ -77,6 +77,7 @@ impl RefSyncptIncrManager {
 
 #[test]
 fn test_step1_ffi_null_safety() {
+    // SAFETY: only null pointers are passed; they are rejected before use.
     unsafe {
         assert_eq!(ryu_syncpt_increment(std::ptr::null_mut(), 1), -1);
         assert_eq!(
@@ -99,6 +100,7 @@ fn test_step1_ffi_null_safety() {
 
 #[test]
 fn test_step1_lifecycle_and_drain_bounds() {
+    // SAFETY: `seq` is live until its destroy; buffers are live locals with matching lengths.
     unsafe {
         let seq = ryu_syncpt_create();
         assert!(!seq.is_null());

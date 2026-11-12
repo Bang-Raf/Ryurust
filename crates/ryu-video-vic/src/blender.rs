@@ -55,6 +55,7 @@ fn transform_pixel(src_px: VicPixel, matrix: &VicColorMatrix) -> VicPixel {
 /// `src_width * src_height`; otherwise nothing is written and
 /// `Err(VIC_STATUS_INVALID_ARGUMENT)` is returned. The check is done up front, so the serial
 /// and the `parallel` path can never index outside the buffers.
+#[allow(clippy::too_many_arguments)] // backs the `ryu_vic_blend_surface` C ABI parameter list
 pub fn blend_surface(
     dst: &mut [VicPixel],
     dst_width: usize,

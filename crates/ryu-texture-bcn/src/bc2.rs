@@ -18,8 +18,8 @@ pub fn decode_bc2_block(input: &[u8; 16], output: &mut [u32; 16]) {
 
     let mut indices = u32::from_le_bytes(rgb_input[4..8].try_into().unwrap());
     let mut rgb_tile = [0u32; 16];
-    for i in 0..16 {
-        rgb_tile[i] = clut[(indices & 3) as usize];
+    for texel in rgb_tile.iter_mut() {
+        *texel = clut[(indices & 3) as usize];
         indices >>= 2;
     }
 
@@ -41,8 +41,8 @@ pub fn decode_bc2_surface(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 16;
     let expected_dst = width * height * 4;
     if src.len() < expected_src {

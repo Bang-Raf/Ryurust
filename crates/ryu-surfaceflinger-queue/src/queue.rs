@@ -30,7 +30,7 @@ unsafe impl Sync for SurfaceFlingerQueue {}
 
 impl SurfaceFlingerQueue {
     pub fn new(max_buffers: usize) -> Self {
-        let max_b = max_buffers.min(NUM_BUFFER_SLOTS).max(1);
+        let max_b = max_buffers.clamp(1, NUM_BUFFER_SLOTS);
         let init_free = if max_b == 64 {
             u64::MAX
         } else {
@@ -57,7 +57,7 @@ impl SurfaceFlingerQueue {
     }
 
     pub fn set_max_buffers(&self, count: usize) {
-        let count = count.min(NUM_BUFFER_SLOTS).max(1);
+        let count = count.clamp(1, NUM_BUFFER_SLOTS);
         self.max_buffers.store(count as u32, Ordering::Release);
     }
 

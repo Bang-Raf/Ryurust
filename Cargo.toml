@@ -55,33 +55,6 @@ lto = "thin"
 codegen-units = 1
 debug = false
 
-# Lints that existing crates trip today. They are allowed here so CI can run
-# clippy with `-D warnings` for everything else. Each one is cleanup work:
-# fix the code, then delete the line. See docs/DEVELOPMENT.md.
+# No workspace-wide clippy allows: the few intentional exceptions are local
+# `#[allow]`s with a reason next to the code they cover.
 [workspace.lints.clippy]
-excessive_precision = "allow"        # filter/coefficient tables
-missing_safety_doc = "allow"         # FFI functions lack `# Safety` docs
-not_unsafe_ptr_arg_deref = "allow"   # safe `extern "C"` fns deref raw pointers
-needless_range_loop = "allow"
-manual_div_ceil = "allow"
-identity_op = "allow"
-too_many_arguments = "allow"
-manual_is_multiple_of = "allow"
-manual_memcpy = "allow"
-unnecessary_cast = "allow"
-manual_clamp = "allow"
-field_reassign_with_default = "allow"
-question_mark = "allow"
-manual_range_contains = "allow"
-new_without_default = "allow"
-double_parens = "allow"
-needless_return = "allow"
-if_same_then_else = "allow"
-manual_range_patterns = "allow"
-manual_checked_ops = "allow"
-len_zero = "allow"
-derivable_impls = "allow"
-empty_line_after_doc_comments = "allow"
-chunks_exact_to_as_chunks = "allow"
-unwrap_or_default = "allow"
-approx_constant = "allow"

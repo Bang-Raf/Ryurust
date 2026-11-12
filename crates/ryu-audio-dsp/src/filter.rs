@@ -372,6 +372,7 @@ pub fn process_double_biquad_filter_and_mix(
 
 /// Apply double biquad filter in Direct Form 1 and mix into output buffer with volume ramp.
 /// Matches `BiquadFilterHelper.ProcessDoubleBiquadFilterAndMixRamp(...)`.
+#[allow(clippy::too_many_arguments)] // mirrors C# `BiquadFilterHelper` parameter list and backs the C ABI export
 #[inline]
 pub fn process_double_biquad_filter_and_mix_ramp(
     parameter0: &BiquadFilterParameter,

@@ -22,7 +22,7 @@ struct RefAddressArbiter {
 #[allow(dead_code)]
 impl RefAddressArbiter {
     fn insert_waiter(&mut self, address: u64, thread_id: u64, priority: i32) {
-        let threads = self.arbiter_threads.entry(address).or_insert_with(Vec::new);
+        let threads = self.arbiter_threads.entry(address).or_default();
         let waiter = RefWaiter {
             thread_id,
             priority,
@@ -57,9 +57,7 @@ impl RefAddressArbiter {
                 threads.len().min(count as usize)
             };
 
-            for i in 0..valid_count {
-                woken.push(threads[i].thread_id);
-            }
+            woken.extend(threads[..valid_count].iter().map(|t| t.thread_id));
             threads.drain(0..valid_count);
 
             if threads.is_empty() {
@@ -223,9 +221,9 @@ fn test_step2_concurrent_sharded_arbitration() {
     for t in 0..16 {
         let reg = registry.clone();
         handles.push(thread::spawn(move || {
-            let base_addr = 0x7100000000 + (t as u64) * 0x1000;
+            let base_addr = 0x7100000000 + t * 0x1000;
             for i in 0..1000 {
-                let addr = base_addr + ((i % 8) as u64) * 4;
+                let addr = base_addr + (i % 8) * 4;
                 reg.insert_waiter(addr, t * 1000 + i, (i % 64) as i32);
                 if i % 3 == 0 {
                     let mut woken = [0u64; 2];

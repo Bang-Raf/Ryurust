@@ -7,6 +7,18 @@ use crate::biquad::{
 };
 use std::slice;
 
+pub const RYU_AUDIO_FX_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_audio_fx_version() -> u32 {
+    RYU_AUDIO_FX_VERSION
+}
+
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process(
     param: *const BiquadFilterParameter,
@@ -31,6 +43,11 @@ pub unsafe extern "C" fn ryu_biquad_process(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process_and_mix(
     param: *const BiquadFilterParameter,
@@ -63,6 +80,12 @@ pub unsafe extern "C" fn ryu_biquad_process_and_mix(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
+/// `out_last_sample` must be null or valid for a write of one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process_and_mix_ramp(
     param: *const BiquadFilterParameter,
@@ -103,6 +126,11 @@ pub unsafe extern "C" fn ryu_biquad_process_and_mix_ramp(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `params` must be valid for reads and `states` for reads and writes of `stage_count`
+/// elements; `states` must not be accessed by anything else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process_multi(
     params: *const BiquadFilterParameter,
@@ -134,6 +162,11 @@ pub unsafe extern "C" fn ryu_biquad_process_multi(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `param0`/`param1` and `state0`/`state1` must point to valid values; the two states must be
+/// distinct and not accessed by anything else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process_double_and_mix(
     param0: *const BiquadFilterParameter,
@@ -169,6 +202,12 @@ pub unsafe extern "C" fn ryu_biquad_process_double_and_mix(
     0
 }
 
+/// # Safety
+/// `input` must be valid for reads and `output` for writes of `sample_count` floats, and the
+/// two ranges must not overlap.
+/// `param0`/`param1` and `state0`/`state1` must point to valid values; the two states must be
+/// distinct and not accessed by anything else during the call.
+/// `out_last_sample` must be null or valid for a write of one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_biquad_process_double_and_mix_ramp(
     param0: *const BiquadFilterParameter,
@@ -219,4 +258,77 @@ pub unsafe extern "C" fn ryu_biquad_process_double_and_mix_ramp(
     }
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_audio_fx_version(), RYU_AUDIO_FX_VERSION);
+        assert_eq!(RYU_AUDIO_FX_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(
+                ryu_biquad_process(null(), null_mut(), null_mut(), null(), 4),
+                -1
+            );
+            assert_eq!(
+                ryu_biquad_process_and_mix(null(), null_mut(), null_mut(), null(), 4, 1.0),
+                -1
+            );
+            assert_eq!(
+                ryu_biquad_process_and_mix_ramp(
+                    null(),
+                    null_mut(),
+                    null_mut(),
+                    null(),
+                    4,
+                    1.0,
+                    0.0,
+                    null_mut()
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_biquad_process_multi(null(), null_mut(), 2, null_mut(), null(), 4),
+                -1
+            );
+            assert_eq!(
+                ryu_biquad_process_double_and_mix(
+                    null(),
+                    null(),
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    null(),
+                    4,
+                    1.0
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_biquad_process_double_and_mix_ramp(
+                    null(),
+                    null(),
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    null(),
+                    4,
+                    1.0,
+                    0.0,
+                    null_mut()
+                ),
+                -1
+            );
+        }
+    }
 }

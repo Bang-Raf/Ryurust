@@ -396,7 +396,7 @@ fn unquantize_texel_weights(
                 let jt = gt >> 4;
                 let ft = (gt & 0xF) as i32;
 
-                let w11 = ((fs * ft + 8) >> 4) as i32;
+                let w11 = (fs * ft + 8) >> 4;
                 let v0 = js + jt * texel_params.width;
                 let mut weight = 8i32;
                 let wxh = texel_params.width * texel_params.height;
@@ -716,30 +716,39 @@ fn compute_endpoints(
 
 /// Decodes the colour endpoint integers into `output_values`.
 ///
-/// Returns `false` if the block encodes more colour values than `output_values` can
-/// hold (an illegal block; the C# reference throws an index exception here).
+/// `number_bits_for_color_data` can be negative: like the C# decoder, this does not
+/// reject blocks whose weights leave no room for colour data (it then decodes zeros).
+///
+/// Returns `false` where the C# reference throws: the block encodes more colour values
+/// than `output_values` can hold, or the chosen range is a trit/quint encoding with no
+/// unquantisation rule (zero-bit trits/quints).
 fn decode_color_values(
     output_values: &mut [i32],
     color_bit_stream: &mut BitStream128,
     modes: &[u32],
     number_partitions: usize,
-    number_bits_for_color_data: usize,
+    number_bits_for_color_data: isize,
 ) -> bool {
     let mut number_values = 0;
     for &mode in &modes[..number_partitions] {
         number_values += (((mode >> 2) + 1) as usize) << 1;
     }
 
+    // Same search as the C# `while (--range > 0)` loops: the largest range whose
+    // encoding fits, lowered to the smallest range sharing that encoding. If nothing
+    // fits, the range ends at 0 (a zero-bit encoding).
     let mut range = 256usize;
-    while range > 1 {
+    loop {
         range -= 1;
+        if range == 0 {
+            break;
+        }
         let int_encoded = create_encoding(range);
-        let bit_length = int_encoded.get_bit_length(number_values);
+        let bit_length = int_encoded.get_bit_length(number_values) as isize;
         if bit_length <= number_bits_for_color_data {
-            while range > 1 {
+            loop {
                 range -= 1;
-                let new_encoded = create_encoding(range);
-                if !new_encoded.matches_encoding(&int_encoded) {
+                if range == 0 || !create_encoding(range).matches_encoding(&int_encoded) {
                     break;
                 }
             }
@@ -797,7 +806,7 @@ fn decode_color_values(
                         let fedcb = (bit_value >> 1) & 0x1F;
                         (5, (fedcb << 4) | (fedcb >> 4))
                     }
-                    _ => (0, 0),
+                    _ => return false,
                 };
 
                 let mut t = d * c + b;
@@ -826,7 +835,7 @@ fn decode_color_values(
                         let edcb = (bit_value >> 1) & 0xF;
                         (6, (edcb << 5) | (edcb >> 3))
                     }
-                    _ => (0, 0),
+                    _ => return false,
                 };
 
                 let mut t = d * c + b;
@@ -908,10 +917,14 @@ fn decompress_block_inner(
 
     let base_mode = base_color_endpoint_mode & 3;
     let number_weight_bits = texel_params.get_packed_bit_size();
-    if bit_stream.bits_left() < number_weight_bits {
+    // The C# decoder writes the reversed weight data into a 16-byte buffer at byte
+    // `number_weight_bits / 8`, which throws for 128 or more weight bits.
+    if number_weight_bits >= 128 {
         return false;
     }
-    let mut remaining_bits = bit_stream.bits_left() - number_weight_bits;
+    // Signed, as in C#: weights that do not leave room for the colour data (a
+    // non-conformant block) are not rejected; the colour bit budget just goes negative.
+    let mut remaining_bits = bit_stream.bits_left() as isize - number_weight_bits as isize;
 
     let mut extra_color_endpoint_mode_bits = 0usize;
     if base_mode != 0 {
@@ -923,24 +936,18 @@ fn decompress_block_inner(
         }
     }
 
-    if remaining_bits < extra_color_endpoint_mode_bits {
-        return false;
-    }
-    remaining_bits -= extra_color_endpoint_mode_bits;
+    remaining_bits -= extra_color_endpoint_mode_bits as isize;
 
     let plane_selector_bits = if texel_params.dual_plane { 2 } else { 0 };
-    if remaining_bits < plane_selector_bits {
-        return false;
-    }
-    remaining_bits -= plane_selector_bits;
+    remaining_bits -= plane_selector_bits as isize;
 
     let color_data_bits = remaining_bits;
     let mut color_endpoint_stream = BitStream128::empty();
     while remaining_bits > 0 {
-        let n = min(remaining_bits, 8);
+        let n = min(remaining_bits, 8) as usize;
         let bits = bit_stream.read_bits(n);
         color_endpoint_stream.write_bits(bits, n);
-        remaining_bits -= n;
+        remaining_bits -= 8;
     }
 
     let plane_indices = bit_stream.read_bits(plane_selector_bits) as usize;
@@ -1010,14 +1017,10 @@ fn decompress_block_inner(
         texel_weight_data[15 - i] = a;
     }
 
-    let clear_byte_start = (texel_params.get_packed_bit_size() >> 3) + 1;
-    if clear_byte_start <= 16 {
-        texel_weight_data[clear_byte_start - 1] &=
-            ((1 << (texel_params.get_packed_bit_size() % 8)) - 1) as u8;
-        for item in texel_weight_data.iter_mut().take(16).skip(clear_byte_start) {
-            *item = 0;
-        }
-    }
+    // `number_weight_bits < 128` was checked above, so `clear_byte_start <= 16`.
+    let clear_byte_start = (number_weight_bits >> 3) + 1;
+    texel_weight_data[clear_byte_start - 1] &= ((1u32 << (number_weight_bits % 8)) - 1) as u8;
+    texel_weight_data[clear_byte_start..].fill(0);
 
     let mut weight_bit_stream = BitStream128::new(&texel_weight_data);
     let mut texel_weight_values = [IntegerEncoded::new(EIntegerEncoding::JustBits, 0); 144];
@@ -1060,7 +1063,10 @@ fn decompress_block_inner(
                 let comp1 = replicate_8_16(endpoints[partition][1].get_component(component) as usize)
                     as i32;
 
-                let plane = if texel_params.dual_plane && (((plane_indices + 1) & 3) == component) {
+                // The C# test is `((planeIndices + 1) & 3) == component` with components
+                // indexed A, R, G, B; in this loop's R, G, B, A order that is simply
+                // `component == plane_indices` (0 = R, 1 = G, 2 = B, 3 = A).
+                let plane = if texel_params.dual_plane && plane_indices == component {
                     1
                 } else {
                     0
@@ -1143,8 +1149,8 @@ pub fn calculate_levels(
             let img_x = max(1, width >> i);
             let img_y = max(1, height >> i);
             let img_z = max(1, depth >> i);
-            let blk_x = (img_x + block_width - 1) / block_width;
-            let blk_y = (img_y + block_height - 1) / block_height;
+            let blk_x = img_x.div_ceil(block_width);
+            let blk_y = img_y.div_ceil(block_height);
 
             let level = AstcLevel {
                 image_size_x: img_x,
@@ -1181,10 +1187,15 @@ fn write_decompressed_block(
     let pixel_coord_y = block_coord_y * block_height;
 
     let output_pixels_x = min(pixel_coord_x + block_width, level.image_size_x) - pixel_coord_x;
+    // Like the C# `WriteDecompressedBlock`, 3D levels are treated as `image_size_z` slices
+    // stacked vertically, but the block grid is `block_count_y` rows per slice. When the
+    // height is not a multiple of the block height, the last block rows start past the end
+    // of the stacked image; C# then computes a negative row count and writes nothing.
     let output_pixels_y = min(
         pixel_coord_y + block_height,
         level.image_size_y * level.image_size_z,
-    ) - pixel_coord_y;
+    )
+    .saturating_sub(pixel_coord_y);
 
     let output_start = pixel_coord_x * 4 + pixel_coord_y * stride;
     let mut output_offset = output_start;
@@ -1206,6 +1217,16 @@ fn bytemuck_cast_u32_slice(slice: &[u32]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * 4) }
 }
 
+/// Decodes a whole ASTC texture (all levels and layers) to RGBA8.
+///
+/// Mirrors the C# `AstcDecoder.TryDecodeToRgba8`: every block is decoded and written,
+/// and the result is `false` if any block was illegal or unsupported. Unlike the C#
+/// decoder, which leaves such blocks zeroed, illegal blocks are written as the ASTC
+/// error colour ([`ASTC_ERROR_COLOR`], opaque magenta).
+///
+/// Also returns `false`, without decoding anything, when `data` holds fewer blocks
+/// than the texture needs or `output` is shorter than [`query_decompressed_size`].
+#[allow(clippy::too_many_arguments)] // mirrors C# `AstcDecoder.TryDecodeToRgba8`
 pub fn decode_astc_to_rgba8(
     data: &[u8],
     output: &mut [u8],
@@ -1217,6 +1238,10 @@ pub fn decode_astc_to_rgba8(
     levels: usize,
     layers: usize,
 ) -> bool {
+    // ASTC blocks are at most 12x12; the decoder's texel scratch holds 144 entries.
+    if block_width > 12 || block_height > 12 {
+        return false;
+    }
     let (astc_levels, total_blocks) = calculate_levels(
         width,
         height,
@@ -1226,12 +1251,15 @@ pub fn decode_astc_to_rgba8(
         block_width,
         block_height,
     );
-    if data.len() < total_blocks * 16 {
+    if data.len() < total_blocks * 16
+        || output.len() < query_decompressed_size(width, height, depth, levels, layers)
+    {
         return false;
     }
 
     let mut decompressed_data = [0u32; 144];
     let mut current_level_idx = 0;
+    let mut all_blocks_valid = true;
 
     for block_idx in 0..total_blocks {
         while current_level_idx + 1 < astc_levels.len()
@@ -1248,7 +1276,7 @@ pub fn decode_astc_to_rgba8(
             .unwrap();
 
         // Illegal blocks come back filled with the ASTC error colour.
-        decompress_block(
+        all_blocks_valid &= decompress_block(
             block_bytes,
             &mut decompressed_data,
             block_width,
@@ -1266,10 +1294,12 @@ pub fn decode_astc_to_rgba8(
         );
     }
 
-    true
+    all_blocks_valid
 }
 
+/// Parallel version of [`decode_astc_to_rgba8`], with the same result and output.
 #[cfg(feature = "parallel")]
+#[allow(clippy::too_many_arguments)] // same signature as `decode_astc_to_rgba8`
 pub fn decode_astc_to_rgba8_parallel(
     data: &[u8],
     output: &mut [u8],
@@ -1283,6 +1313,9 @@ pub fn decode_astc_to_rgba8_parallel(
 ) -> bool {
     use rayon::prelude::*;
 
+    if block_width > 12 || block_height > 12 {
+        return false;
+    }
     let (astc_levels, total_blocks) = calculate_levels(
         width,
         height,
@@ -1292,50 +1325,55 @@ pub fn decode_astc_to_rgba8_parallel(
         block_width,
         block_height,
     );
-    if data.len() < total_blocks * 16 {
+    if data.len() < total_blocks * 16
+        || output.len() < query_decompressed_size(width, height, depth, levels, layers)
+    {
         return false;
     }
 
     let output_ptr = output.as_mut_ptr() as usize;
-
-    (0..total_blocks).into_par_iter().for_each(|block_idx| {
-        let mut level_idx = 0;
-        for (i, lvl) in astc_levels.iter().enumerate() {
-            if block_idx < lvl.start_block + lvl.total_block_count() {
-                level_idx = i;
-                break;
+    // Each block reports its own validity and rayon combines them; a shared flag
+    // written per invalid block made every thread contend on one cache line.
+    (0..total_blocks)
+        .into_par_iter()
+        .map(|block_idx| {
+            let mut level_idx = 0;
+            for (i, lvl) in astc_levels.iter().enumerate() {
+                if block_idx < lvl.start_block + lvl.total_block_count() {
+                    level_idx = i;
+                    break;
+                }
             }
-        }
-        let level = &astc_levels[level_idx];
-        let block_bytes: &[u8; 16] = data[block_idx * 16..(block_idx + 1) * 16]
-            .try_into()
-            .unwrap();
+            let level = &astc_levels[level_idx];
+            let block_bytes: &[u8; 16] = data[block_idx * 16..(block_idx + 1) * 16]
+                .try_into()
+                .unwrap();
 
-        let mut decompressed_data = [0u32; 144];
-        // Illegal blocks come back filled with the ASTC error colour.
-        decompress_block(
-            block_bytes,
-            &mut decompressed_data,
-            block_width,
-            block_height,
-        );
-
-        let local_block_idx = block_idx - level.start_block;
-        unsafe {
-            let out_slice = std::slice::from_raw_parts_mut(
-                (output_ptr + level.output_byte_offset) as *mut u8,
-                level.pixel_count() * 4,
-            );
-            write_decompressed_block(
-                &decompressed_data,
-                out_slice,
-                local_block_idx,
-                level,
+            let mut decompressed_data = [0u32; 144];
+            // Illegal blocks come back filled with the ASTC error colour.
+            let valid = decompress_block(
+                block_bytes,
+                &mut decompressed_data,
                 block_width,
                 block_height,
             );
-        }
-    });
 
-    true
+            let local_block_idx = block_idx - level.start_block;
+            unsafe {
+                let out_slice = std::slice::from_raw_parts_mut(
+                    (output_ptr + level.output_byte_offset) as *mut u8,
+                    level.pixel_count() * 4,
+                );
+                write_decompressed_block(
+                    &decompressed_data,
+                    out_slice,
+                    local_block_idx,
+                    level,
+                    block_width,
+                    block_height,
+                );
+            }
+            valid
+        })
+        .reduce(|| true, |a, b| a & b)
 }

@@ -11,6 +11,17 @@ pub const RYU_STORAGE_ERR_CORRUPT_HEADER: i32 = -3;
 pub const RYU_STORAGE_ERR_DECOMPRESS: i32 = -4;
 pub const RYU_STORAGE_ERR_NOT_FOUND: i32 = -5;
 
+pub const RYU_STORAGE_FS_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_storage_fs_version() -> u32 {
+    RYU_STORAGE_FS_VERSION
+}
+
+/// # Safety
+/// `src` must be valid for reads and `dst` for writes of `len` bytes, and the two
+/// buffers must not overlap (no in-place decryption). `key` and the counter must each
+/// be valid for reads of 16 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_nca_decrypt_stream(
     src: *const u8,
@@ -22,6 +33,10 @@ pub unsafe extern "C" fn ryu_storage_nca_decrypt_stream(
     ryu_storage_nca_decrypt_ctr_offset(src, dst, len, key, counter, 0)
 }
 
+/// # Safety
+/// `src` must be valid for reads and `dst` for writes of `len` bytes, and the two
+/// buffers must not overlap (no in-place decryption). `key` and the counter must each
+/// be valid for reads of 16 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_nca_decrypt_ctr_offset(
     src: *const u8,
@@ -49,6 +64,10 @@ pub unsafe extern "C" fn ryu_storage_nca_decrypt_ctr_offset(
     }
 }
 
+/// # Safety
+/// `src` must be valid for reads of `src_len` bytes and `dst` for writes of
+/// `dst_capacity` bytes, without overlapping; `out_decompressed_bytes` must be valid for
+/// writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_lz4_decompress_block(
     src: *const u8,
@@ -77,6 +96,10 @@ pub unsafe extern "C" fn ryu_storage_lz4_decompress_block(
     }
 }
 
+/// # Safety
+/// `src` must be valid for reads of `src_len` bytes and `dst` for writes of
+/// `dst_capacity` bytes, without overlapping; `out_compressed_bytes` must be valid for
+/// writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_lz4_compress_block(
     src: *const u8,
@@ -105,6 +128,10 @@ pub unsafe extern "C" fn ryu_storage_lz4_compress_block(
     }
 }
 
+/// # Safety
+/// `src` must be valid for reads of `src_len` bytes and `dst` for writes of
+/// `dst_capacity` bytes, without overlapping; `out_decompressed_bytes` must be valid for
+/// writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_zstd_decompress_block(
     src: *const u8,
@@ -133,6 +160,10 @@ pub unsafe extern "C" fn ryu_storage_zstd_decompress_block(
     }
 }
 
+/// # Safety
+/// `src` must be valid for reads of `src_len` bytes and `dst` for writes of
+/// `dst_capacity` bytes, without overlapping; `out_compressed_bytes` must be valid for
+/// writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_zstd_compress_block(
     src: *const u8,
@@ -162,6 +193,9 @@ pub unsafe extern "C" fn ryu_storage_zstd_compress_block(
     }
 }
 
+/// # Safety
+/// `header_ptr` must be valid for reads of `header_len` bytes; both out-pointers must
+/// be valid for writing one `u32`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_pfs0_verify_header(
     header_ptr: *const u8,
@@ -184,6 +218,9 @@ pub unsafe extern "C" fn ryu_storage_pfs0_verify_header(
     }
 }
 
+/// # Safety
+/// `header_ptr` must be valid for reads of `header_len` bytes and `file_name_ptr` for
+/// reads of `file_name_len` bytes; both out-pointers must be valid for writing one `u64`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_pfs0_find_file(
     header_ptr: *const u8,
@@ -215,6 +252,10 @@ pub unsafe extern "C" fn ryu_storage_pfs0_find_file(
     }
 }
 
+/// # Safety
+/// `header_ptr` must be valid for reads of `header_len` bytes and `name_buf` for writes
+/// of `name_buf_capacity` bytes; `out_offset`/`out_size` must be valid for writing one
+/// `u64` and `out_name_len` for writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_storage_pfs0_get_entry(
     header_ptr: *const u8,
@@ -250,5 +291,120 @@ pub unsafe extern "C" fn ryu_storage_pfs0_get_entry(
             RYU_STORAGE_OK
         }
         Err(_) => RYU_STORAGE_ERR_NOT_FOUND,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn version_matches_constant() {
+        assert_eq!(ryu_storage_fs_version(), RYU_STORAGE_FS_VERSION);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        let src = [0u8; 32];
+        let mut dst = [0u8; 64];
+        let key = [0u8; 16];
+        let ctr = [0u8; 16];
+        let mut n = 0usize;
+        let (mut a, mut b) = (0u32, 0u32);
+        let (mut off, mut size) = (0u64, 0u64);
+        let (s, d, k, c) = (src.as_ptr(), dst.as_mut_ptr(), key.as_ptr(), ctr.as_ptr());
+        let (cap, np) = (dst.len(), ptr::null::<u8>());
+        let nm = ptr::null_mut::<u8>();
+        const E: i32 = RYU_STORAGE_ERR_NULL_PTR;
+        unsafe {
+            assert_eq!(ryu_storage_nca_decrypt_stream(np, d, 32, k, c), E);
+            assert_eq!(ryu_storage_nca_decrypt_stream(s, nm, 32, k, c), E);
+            assert_eq!(ryu_storage_nca_decrypt_stream(s, d, 32, np, c), E);
+            assert_eq!(ryu_storage_nca_decrypt_stream(s, d, 32, k, np), E);
+            assert_eq!(ryu_storage_nca_decrypt_ctr_offset(np, d, 32, k, c, 0), E);
+            assert_eq!(ryu_storage_nca_decrypt_ctr_offset(s, nm, 32, k, c, 0), E);
+            assert_eq!(ryu_storage_nca_decrypt_ctr_offset(s, d, 32, np, c, 0), E);
+            assert_eq!(ryu_storage_nca_decrypt_ctr_offset(s, d, 32, k, np, 0), E);
+
+            assert_eq!(ryu_storage_lz4_decompress_block(np, 32, d, cap, &mut n), E);
+            assert_eq!(ryu_storage_lz4_decompress_block(s, 32, nm, cap, &mut n), E);
+            assert_eq!(
+                ryu_storage_lz4_decompress_block(s, 32, d, cap, ptr::null_mut()),
+                E
+            );
+            assert_eq!(ryu_storage_lz4_compress_block(np, 32, d, cap, &mut n), E);
+            assert_eq!(ryu_storage_lz4_compress_block(s, 32, nm, cap, &mut n), E);
+            assert_eq!(
+                ryu_storage_lz4_compress_block(s, 32, d, cap, ptr::null_mut()),
+                E
+            );
+            assert_eq!(ryu_storage_zstd_decompress_block(np, 32, d, cap, &mut n), E);
+            assert_eq!(ryu_storage_zstd_decompress_block(s, 32, nm, cap, &mut n), E);
+            assert_eq!(
+                ryu_storage_zstd_decompress_block(s, 32, d, cap, ptr::null_mut()),
+                E
+            );
+            assert_eq!(
+                ryu_storage_zstd_compress_block(np, 32, d, cap, 3, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_zstd_compress_block(s, 32, nm, cap, 3, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_zstd_compress_block(s, 32, d, cap, 3, ptr::null_mut()),
+                E
+            );
+
+            assert_eq!(ryu_storage_pfs0_verify_header(np, 32, &mut a, &mut b), E);
+            assert_eq!(
+                ryu_storage_pfs0_verify_header(s, 32, ptr::null_mut(), &mut b),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_verify_header(s, 32, &mut a, ptr::null_mut()),
+                E
+            );
+
+            assert_eq!(
+                ryu_storage_pfs0_find_file(np, 32, k, 4, &mut off, &mut size),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_find_file(s, 32, np, 4, &mut off, &mut size),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_find_file(s, 32, k, 4, ptr::null_mut(), &mut size),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_find_file(s, 32, k, 4, &mut off, ptr::null_mut()),
+                E
+            );
+
+            assert_eq!(
+                ryu_storage_pfs0_get_entry(np, 32, 0, &mut off, &mut size, d, cap, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_get_entry(s, 32, 0, ptr::null_mut(), &mut size, d, cap, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_get_entry(s, 32, 0, &mut off, ptr::null_mut(), d, cap, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_get_entry(s, 32, 0, &mut off, &mut size, nm, cap, &mut n),
+                E
+            );
+            assert_eq!(
+                ryu_storage_pfs0_get_entry(s, 32, 0, &mut off, &mut size, d, cap, ptr::null_mut()),
+                E
+            );
+        }
     }
 }

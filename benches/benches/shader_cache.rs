@@ -44,7 +44,7 @@ fn shader_like_payload(len: usize) -> Vec<u8> {
         for w in TEMPLATES[(r & 7) as usize] {
             out.extend_from_slice(&w.to_le_bytes());
         }
-        if (r >> 3) % 4 == 0 {
+        if (r >> 3).is_multiple_of(4) {
             out.extend_from_slice(&(r >> 5).to_le_bytes());
         }
     }

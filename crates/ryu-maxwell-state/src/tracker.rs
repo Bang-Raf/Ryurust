@@ -29,7 +29,7 @@ impl MaxwellStateTracker {
 
     pub fn map_register_range(&mut self, start_offset: usize, count_bytes: usize, group_index: u8) {
         let start_idx = start_offset / REGISTER_SIZE;
-        let reg_count = (count_bytes + REGISTER_SIZE - 1) / REGISTER_SIZE;
+        let reg_count = count_bytes.div_ceil(REGISTER_SIZE);
         let end_idx = (start_idx + reg_count).min(MAXWELL_NUM_REGISTERS);
 
         if group_index < 64 {
@@ -101,6 +101,7 @@ impl MaxwellStateTracker {
         #[cfg(target_arch = "x86_64")]
         {
             if is_x86_feature_detected!("avx2") {
+                // SAFETY: AVX2 was just detected and both slices are exactly `len` bytes.
                 return unsafe { self.scan_changes_avx2(&current[..len], &shadow[..len]) };
             }
         }
@@ -127,6 +128,9 @@ impl MaxwellStateTracker {
 
     /// AVX2 256-bit SIMD register scanner (4x unrolled: 128 bytes / 32 registers per step):
     /// Processes 4x32-byte blocks per branch using integer-domain `_mm256_cmpeq_epi32` & `_mm256_movemask_epi8`.
+    ///
+    /// # Safety
+    /// The CPU must support AVX2 and `shadow` must be at least as long as `current`.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2")]
     pub unsafe fn scan_changes_avx2(&mut self, current: &[u8], shadow: &[u8]) -> u64 {
@@ -283,5 +287,11 @@ impl MaxwellStateTracker {
         }
 
         count
+    }
+}
+
+impl Default for MaxwellStateTracker {
+    fn default() -> Self {
+        Self::new()
     }
 }

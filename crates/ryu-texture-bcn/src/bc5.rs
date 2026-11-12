@@ -30,8 +30,8 @@ pub fn decode_bc5_surface_stride(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 16;
     let expected_dst = stride_pixels * height * 2;
     if src.len() < expected_src {

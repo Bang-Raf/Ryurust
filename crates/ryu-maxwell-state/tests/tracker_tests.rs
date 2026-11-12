@@ -98,23 +98,27 @@ fn test_c_abi_lifecycle() {
     let handle = ryu_maxwell_tracker_create();
     assert!(!handle.is_null());
 
-    ryu_maxwell_tracker_map_register(handle, 0x10, 5);
-    ryu_maxwell_tracker_set_dirty(handle, 0x10);
+    // SAFETY: `handle` is live until the final destroy; buffers are live locals
+    // passed with their own lengths.
+    unsafe {
+        ryu_maxwell_tracker_map_register(handle, 0x10, 5);
+        ryu_maxwell_tracker_set_dirty(handle, 0x10);
 
-    let mask = ryu_maxwell_tracker_get_dirty_mask(handle);
-    assert_eq!(mask, 1 << 5);
+        let mask = ryu_maxwell_tracker_get_dirty_mask(handle);
+        assert_eq!(mask, 1 << 5);
 
-    let mut out = [0u32; 4];
-    let cnt = ryu_maxwell_tracker_collect_dirty(handle, 0xFF, out.as_mut_ptr(), 4);
-    assert_eq!(cnt, 1);
-    assert_eq!(out[0], 5);
+        let mut out = [0u32; 4];
+        let cnt = ryu_maxwell_tracker_collect_dirty(handle, 0xFF, out.as_mut_ptr(), 4);
+        assert_eq!(cnt, 1);
+        assert_eq!(out[0], 5);
 
-    let buf1 = [10u8; 64];
-    let buf2 = [10u8; 64];
-    assert_eq!(
-        ryu_maxwell_pipeline_equals(buf1.as_ptr(), buf2.as_ptr(), 64),
-        1
-    );
+        let buf1 = [10u8; 64];
+        let buf2 = [10u8; 64];
+        assert_eq!(
+            ryu_maxwell_pipeline_equals(buf1.as_ptr(), buf2.as_ptr(), 64),
+            1
+        );
 
-    ryu_maxwell_tracker_destroy(handle);
+        ryu_maxwell_tracker_destroy(handle);
+    }
 }

@@ -1,0 +1,403 @@
+// Golden-fixture generator for the ryu-texture-astc Rust crate.
+using Ryujinx.Common.Utilities;
+using Ryujinx.Graphics.Texture.Astc;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+
+static class Program
+{
+    const ulong BaseSeed = 0xA57C_601D_2026_1111UL;
+
+    struct Rng
+    {
+        ulong _s;
+        public Rng(ulong seed) { _s = seed; }
+        public ulong Next() // splitmix64
+        {
+            _s += 0x9E3779B97F4A7C15UL;
+            ulong z = _s;
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+            return z ^ (z >> 31);
+        }
+    }
+
+    enum Kind { Error, VoidLdr, VoidLdrBad, VoidHdr, Normal }
+
+    struct Header
+    {
+        public Kind Kind;
+        public int W, H, MaxWeight, Partitions;
+        public bool Dual;
+        public readonly int WeightCount => W * H * (Dual ? 2 : 1);
+    }
+
+    // Independent restatement of the block-mode layout (ASTC spec table C.2.8), used only to
+    // classify generated blocks. Expected output always comes from AstcDecoder.
+    static Header Parse(ReadOnlySpan<byte> b)
+    {
+        Header h = default;
+        int mode = (b[0] | (b[1] << 8)) & 0x7FF;
+        if ((mode & 0x1FF) == 0x1FC)
+        {
+            bool hdr = (mode & 0x200) != 0;
+            bool ok = (mode & 0x400) != 0 && (b[1] & 0x08) != 0;
+            h.Kind = hdr ? (ok ? Kind.VoidHdr : Kind.Error) : (ok ? Kind.VoidLdr : Kind.VoidLdrBad);
+            return h;
+        }
+        if ((mode & 0xF) == 0 || ((mode & 0x3) == 0 && (mode & 0x1C0) == 0x1C0))
+        {
+            h.Kind = Kind.Error;
+            return h;
+        }
+        int a = (mode >> 5) & 3, r;
+        bool hasDh = true;
+        if ((mode & 3) != 0)
+        {
+            r = ((mode >> 4) & 1) | ((mode & 3) << 1);
+            int bb = (mode >> 7) & 3;
+            switch ((mode >> 2) & 3)
+            {
+                case 0: h.W = bb + 4; h.H = a + 2; break;
+                case 1: h.W = bb + 8; h.H = a + 2; break;
+                case 2: h.W = a + 2; h.H = bb + 8; break;
+                default:
+                    if ((mode & 0x100) != 0) { h.W = (bb & 1) + 2; h.H = a + 2; }
+                    else { h.W = a + 2; h.H = (bb & 1) + 6; }
+                    break;
+            }
+        }
+        else
+        {
+            r = ((mode >> 4) & 1) | ((mode & 0xC) >> 1);
+            switch ((mode >> 7) & 3)
+            {
+                case 0: h.W = 12; h.H = a + 2; break;
+                case 1: h.W = a + 2; h.H = 12; break;
+                case 3:
+                    if ((mode & 0x20) != 0) { h.W = 10; h.H = 6; } else { h.W = 6; h.H = 10; }
+                    break;
+                default: h.W = a + 6; h.H = ((mode >> 9) & 3) + 6; hasDh = false; break;
+            }
+        }
+        bool hi = hasDh && (mode & 0x200) != 0;
+        h.Dual = hasDh && (mode & 0x400) != 0;
+        int[] lo = [1, 2, 3, 4, 5, 7], hiT = [9, 11, 15, 19, 23, 31];
+        h.MaxWeight = (hi ? hiT : lo)[r - 2];
+        h.Partitions = ((b[1] >> 3) & 3) + 1;
+        h.Kind = Kind.Normal;
+        return h;
+    }
+
+    // (values per group, extra bits per group, bits per value) of the weight sequence.
+    static (int group, int groupBits, int bits) WeightEncoding(int maxWeight) => maxWeight switch
+    {
+        1 => (1, 0, 1), 3 => (1, 0, 2), 7 => (1, 0, 3), 15 => (1, 0, 4), 31 => (1, 0, 5),
+        2 => (5, 8, 0), 5 => (5, 8, 1), 11 => (5, 8, 2), 23 => (5, 8, 3),
+        4 => (3, 7, 0), 9 => (3, 7, 1), 19 => (3, 7, 2),
+        _ => throw new InvalidOperationException(),
+    };
+
+    static int WeightBits(in Header h)
+    {
+        (int group, int groupBits, int bits) = WeightEncoding(h.MaxWeight);
+        int n = h.WeightCount;
+        return bits * n + (group == 1 ? 0 : (n * groupBits + group - 1) / group);
+    }
+
+    // AstcDecoder stores decoded weights in a fixed 100-entry IntegerSequence with no bounds
+    // check (Debug.Assert only), so a block that decodes more than 100 weight entries without
+    // first throwing (weight bits >= 128 throws while clearing the reversed buffer) overruns a
+    // stack struct. That output is undefined, so such blocks are never emitted.
+    static bool IsUndefinedInCSharp(in Header h)
+    {
+        if (h.Kind != Kind.Normal)
+        {
+            return false;
+        }
+        (int group, _, _) = WeightEncoding(h.MaxWeight);
+        int decoded = (h.WeightCount + group - 1) / group * group;
+        return decoded > 100 && WeightBits(h) < 128;
+    }
+
+    // Weight constraints from the ASTC spec that AstcDecoder does not enforce.
+    static bool LegalWeights(in Header h)
+    {
+        int bits = WeightBits(h);
+        return h.WeightCount <= 64 && bits >= 24 && bits <= 96;
+    }
+
+    static bool CsDecode(ReadOnlySpan<byte> block, Span<int> scratch, int bw, int bh)
+    {
+        try
+        {
+            return AstcDecoder.DecompressBlock(MemoryMarshal.Read<Buffer16>(block), scratch, bw, bh);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    static readonly string[] CategoryNames =
+    [
+        "1part", "2part", "3part", "4part", "dual", "dual+parts",
+        "void", "nonconformant", "invalid", "random",
+    ];
+
+    static readonly string[] InvalidNames =
+    [
+        "reserved-mode", "hdr-void", "bad-void", "grid-too-large", "4part+dual", "other",
+    ];
+
+    static void Fill(ref Rng rng, Span<byte> block)
+    {
+        MemoryMarshal.Write(block, rng.Next());
+        MemoryMarshal.Write(block[8..], rng.Next());
+    }
+
+    static void SetPartitions(Span<byte> b, int parts) => b[1] = (byte)((b[1] & ~0x18) | ((parts - 1) << 3));
+
+    static void SetVoid(Span<byte> b, bool hdr)
+    {
+        b[0] = 0xFC;
+        b[1] = (byte)((b[1] & 0xF0) | 0x0D | (hdr ? 0x02 : 0x00));
+    }
+
+    // Draws random blocks, nudging header bits toward the wanted category, until one belongs
+    // to it according to Parse plus the C# decoder's verdict.
+    static void MakeBlock(ref Rng rng, Span<byte> b, int category, int invalidKind, int bw, int bh,
+        Span<int> scratch, int[] catCount, int[] invCount)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            // A category impossible for this block size degrades (invalid sub-kind -> "other",
+            // anything else -> "random").
+            if (attempt == 200_000)
+            {
+                if (category == 8 && invalidKind != 5) { invalidKind = 5; }
+                else { category = 9; }
+                attempt = 0;
+            }
+
+            Fill(ref rng, b);
+
+            switch (category)
+            {
+                case 0: SetPartitions(b, 1); b[1] &= 0xFB; break;
+                case 1: SetPartitions(b, 2); b[1] &= 0xFB; break;
+                case 2: SetPartitions(b, 3); b[1] &= 0xFB; break;
+                case 3: SetPartitions(b, 4); b[1] &= 0xFB; break;
+                case 4: SetPartitions(b, 1); b[1] |= 0x04; break;
+                case 5: SetPartitions(b, 2 + (int)(rng.Next() & 1)); b[1] |= 0x04; break;
+                case 6: SetVoid(b, false); break;
+                case 8:
+                    switch (invalidKind)
+                    {
+                        case 1: SetVoid(b, true); break;
+                        case 2: SetVoid(b, false); b[1] &= (byte)((rng.Next() & 1) != 0 ? 0xFB : 0xF7); break;
+                        case 4: SetPartitions(b, 4); b[1] |= 0x04; break;
+                    }
+                    break;
+            }
+
+            Header h = Parse(b);
+            if (IsUndefinedInCSharp(h))
+            {
+                continue;
+            }
+
+            bool ok = CsDecode(b, scratch, bw, bh);
+            bool normalOk = ok && h.Kind == Kind.Normal;
+            bool legal = normalOk && LegalWeights(h);
+            bool match = category switch
+            {
+                0 => legal && !h.Dual && h.Partitions == 1,
+                1 => legal && !h.Dual && h.Partitions == 2,
+                2 => legal && !h.Dual && h.Partitions == 3,
+                3 => legal && !h.Dual && h.Partitions == 4,
+                4 => legal && h.Dual && h.Partitions == 1,
+                5 => legal && h.Dual && h.Partitions > 1,
+                6 => ok && h.Kind == Kind.VoidLdr,
+                7 => normalOk && !legal,
+                8 => !ok && invalidKind switch
+                {
+                    0 => h.Kind == Kind.Error,
+                    1 => h.Kind == Kind.VoidHdr,
+                    2 => h.Kind == Kind.VoidLdrBad,
+                    3 => h.Kind == Kind.Normal && (h.W > bw || h.H > bh),
+                    4 => h.Kind == Kind.Normal && h.W <= bw && h.H <= bh && h.Partitions == 4 && h.Dual,
+                    _ => h.Kind == Kind.Normal && h.W <= bw && h.H <= bh && !(h.Partitions == 4 && h.Dual),
+                },
+                _ => true,
+            };
+
+            if (match)
+            {
+                catCount[category]++;
+                if (category == 8) { invCount[invalidKind]++; }
+                return;
+            }
+        }
+    }
+
+    record Case(string Name, int Bw, int Bh, int Width, int Height, int Depth, int Levels, int Layers);
+
+    static int BlockCount(Case c)
+    {
+        int total = 0;
+        for (int i = 0; i < c.Levels; i++)
+        {
+            int x = Math.Max(1, c.Width >> i), y = Math.Max(1, c.Height >> i), z = Math.Max(1, c.Depth >> i);
+            total += ((x + c.Bw - 1) / c.Bw) * ((y + c.Bh - 1) / c.Bh) * z * c.Layers;
+        }
+        return total;
+    }
+
+    static void Generate(Case c, string outDir)
+    {
+        // FNV-1a of the case name gives each case an independent stream.
+        ulong seed = BaseSeed;
+        foreach (byte ch in Encoding.ASCII.GetBytes(c.Name)) { seed = (seed ^ ch) * 0x100000001B3UL; }
+        Rng rng = new(seed);
+
+        int blocks = BlockCount(c);
+        byte[] input = new byte[blocks * 16];
+        byte[] blockOk = new byte[blocks];
+        int[] catCount = new int[10], invCount = new int[6];
+        Span<int> scratch = stackalloc int[144];
+        int invalidSeq = 0, okBlocks = 0;
+
+        for (int i = 0; i < blocks; i++)
+        {
+            int category = i % 10;
+            int invalidKind = category == 8 ? invalidSeq++ % 6 : 0;
+            Span<byte> b = input.AsSpan(i * 16, 16);
+            MakeBlock(ref rng, b, category, invalidKind, c.Bw, c.Bh, scratch, catCount, invCount);
+            blockOk[i] = CsDecode(b, scratch, c.Bw, c.Bh) ? (byte)1 : (byte)0;
+            okBlocks += blockOk[i];
+        }
+
+        byte[] output = new byte[AstcDecoder.QueryDecompressedSize(c.Width, c.Height, c.Depth, c.Levels, c.Layers)];
+        output.AsSpan().Fill(0xCD); // so untouched bytes would be visible
+        bool success = AstcDecoder.TryDecodeToRgba8(input, output, c.Bw, c.Bh, c.Width, c.Height, c.Depth, c.Levels, c.Layers);
+
+        if (success != (okBlocks == blocks))
+        {
+            throw new InvalidOperationException($"{c.Name}: image status {success} disagrees with per-block status");
+        }
+
+        using (BinaryWriter w = new(File.Create(Path.Combine(outDir, c.Name + ".bin"))))
+        {
+            w.Write(Encoding.ASCII.GetBytes("RYUASTC1"));
+            w.Write(c.Bw); w.Write(c.Bh); w.Write(c.Width); w.Write(c.Height);
+            w.Write(c.Depth); w.Write(c.Levels); w.Write(c.Layers);
+            w.Write(blocks);
+            w.Write(output.Length);
+            w.Write(success ? (byte)1 : (byte)0);
+            w.Write((byte)0); w.Write((byte)0); w.Write((byte)0);
+            w.Write(input);
+            w.Write(blockOk);
+            w.Write(output);
+        }
+
+        StringBuilder sb = new();
+        sb.Append($"{c.Name}: blocks={blocks} ok={okBlocks} failed={blocks - okBlocks} success={success} |");
+        for (int k = 0; k < 10; k++) { sb.Append($" {CategoryNames[k]}={catCount[k]}"); }
+        sb.Append(" | invalid:");
+        for (int k = 0; k < 6; k++) { sb.Append($" {InvalidNames[k]}={invCount[k]}"); }
+        Console.WriteLine(sb.ToString());
+    }
+
+    static int Main(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("usage: AstcGolden gen <outdir> | fuzz <outdir> <blocks-per-size>");
+            return 2;
+        }
+
+        string outDir = args[1];
+        Directory.CreateDirectory(outDir);
+        List<Case> cases = [];
+
+        if (args[0] == "gen")
+        {
+            (int bw, int bh, int cols, int rows)[] grids =
+            [
+                (4, 4, 20, 20), (5, 5, 16, 16), (6, 5, 14, 14), (6, 6, 15, 12),
+                (8, 8, 10, 10), (10, 8, 10, 8), (10, 10, 8, 8), (12, 12, 8, 6),
+            ];
+            foreach ((int bw, int bh, int cols, int rows) in grids)
+            {
+                cases.Add(new Case($"blocks_{bw}x{bh}", bw, bh, bw * cols, bh * rows, 1, 1, 1));
+            }
+
+            cases.Add(new Case("layout_4x4_37x29_mips3_layers2", 4, 4, 37, 29, 1, 3, 2));
+            cases.Add(new Case("layout_8x8_20x13x3_mips2", 8, 8, 20, 13, 3, 2, 1));
+            cases.Add(new Case("layout_12x12_7x5_mips3_layers3", 12, 12, 7, 5, 1, 3, 3));
+            cases.Add(new Case("valid_only_6x6_18x12", 6, 6, 18, 12, 1, 1, 1));
+        }
+        else
+        {
+            int n = int.Parse(args[2]);
+            (int, int)[] sizes =
+            [
+                (4, 4), (5, 4), (5, 5), (6, 5), (6, 6), (8, 5), (8, 6), (8, 8),
+                (10, 5), (10, 6), (10, 8), (10, 10), (12, 10), (12, 12),
+            ];
+            foreach ((int bw, int bh) in sizes)
+            {
+                int cols = 50, rows = (n + cols - 1) / cols;
+                cases.Add(new Case($"fuzz_{bw}x{bh}", bw, bh, bw * cols, bh * rows, 1, 1, 1));
+            }
+        }
+
+        foreach (Case c in cases)
+        {
+            if (c.Name.StartsWith("valid_only"))
+            {
+                GenerateValidOnly(c, outDir);
+            }
+            else
+            {
+                Generate(c, outDir);
+            }
+        }
+
+        return 0;
+    }
+
+    // An all-valid image, so the success path of the image-level status is covered too.
+    static void GenerateValidOnly(Case c, string outDir)
+    {
+        ulong seed = BaseSeed;
+        foreach (byte ch in Encoding.ASCII.GetBytes(c.Name)) { seed = (seed ^ ch) * 0x100000001B3UL; }
+        Rng rng = new(seed);
+        int blocks = BlockCount(c);
+        byte[] input = new byte[blocks * 16];
+        int[] catCount = new int[10], invCount = new int[6];
+        Span<int> scratch = stackalloc int[144];
+        int[] validCats = [0, 1, 2, 3, 4, 5, 6, 7];
+        for (int i = 0; i < blocks; i++)
+        {
+            MakeBlock(ref rng, input.AsSpan(i * 16, 16), validCats[i % validCats.Length], 0, c.Bw, c.Bh, scratch, catCount, invCount);
+        }
+        byte[] output = new byte[AstcDecoder.QueryDecompressedSize(c.Width, c.Height, c.Depth, c.Levels, c.Layers)];
+        bool success = AstcDecoder.TryDecodeToRgba8(input, output, c.Bw, c.Bh, c.Width, c.Height, c.Depth, c.Levels, c.Layers);
+        if (!success) { throw new InvalidOperationException("valid-only image failed"); }
+        using BinaryWriter w = new(File.Create(Path.Combine(outDir, c.Name + ".bin")));
+        w.Write(Encoding.ASCII.GetBytes("RYUASTC1"));
+        w.Write(c.Bw); w.Write(c.Bh); w.Write(c.Width); w.Write(c.Height);
+        w.Write(c.Depth); w.Write(c.Levels); w.Write(c.Layers);
+        w.Write(blocks); w.Write(output.Length);
+        w.Write((byte)1); w.Write((byte)0); w.Write((byte)0); w.Write((byte)0);
+        w.Write(input);
+        for (int i = 0; i < blocks; i++) { w.Write((byte)1); }
+        w.Write(output);
+        Console.WriteLine($"{c.Name}: blocks={blocks} all valid | " + string.Join(' ', catCount));
+    }
+}

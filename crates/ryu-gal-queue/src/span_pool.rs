@@ -106,11 +106,13 @@ impl GalSpanPool {
         }
 
         let offset = cons as usize;
-        if offset + size > self.size {
+        // `checked_add`: a wrapped sum would pass the bound check with `offset`
+        // possibly outside the pool.
+        if offset.checked_add(size).is_none_or(|end| end > self.size) {
             return std::ptr::null();
         }
 
-        // SAFETY: `offset + size <= self.size` was checked above.
+        // SAFETY: `offset + size <= self.size` was checked above (without overflow).
         unsafe { UnsafeCell::raw_get(self.pool.as_ptr()).add(offset) as *const u8 }
     }
 

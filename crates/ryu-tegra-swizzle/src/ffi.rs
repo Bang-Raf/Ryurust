@@ -11,6 +11,13 @@ pub const SWIZZLE_STATUS_NULL_POINTER: i32 = -1;
 pub const SWIZZLE_STATUS_BUFFER_TOO_SMALL: i32 = -2;
 pub const SWIZZLE_STATUS_INVALID_ARGUMENT: i32 = -3;
 
+pub const RYU_TEGRA_SWIZZLE_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_tegra_swizzle_version() -> u32 {
+    RYU_TEGRA_SWIZZLE_VERSION
+}
+
 fn map_error(err: SwizzleError) -> i32 {
     match err {
         SwizzleError::BufferTooSmall => SWIZZLE_STATUS_BUFFER_TOO_SMALL,
@@ -20,6 +27,9 @@ fn map_error(err: SwizzleError) -> i32 {
     }
 }
 
+/// # Safety
+/// This function takes no pointers and has no requirements; it is `unsafe` only because it
+/// was originally exported that way.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_swizzle_query_block_linear_size(
     width: i32,
@@ -50,6 +60,9 @@ pub unsafe extern "C" fn ryu_swizzle_query_block_linear_size(
     .unwrap_or(0)
 }
 
+/// # Safety
+/// `dst` must be valid for writes of `dst_len` bytes and `src` for reads of `src_len` bytes,
+/// without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_swizzle_block_linear_to_pitch(
     dst: *mut u8,
@@ -86,6 +99,9 @@ pub unsafe extern "C" fn ryu_swizzle_block_linear_to_pitch(
     }
 }
 
+/// # Safety
+/// `dst` must be valid for writes of `dst_len` bytes and `src` for reads of `src_len` bytes,
+/// without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_swizzle_block_linear_to_pitch_parallel(
     dst: *mut u8,
@@ -122,6 +138,9 @@ pub unsafe extern "C" fn ryu_swizzle_block_linear_to_pitch_parallel(
     }
 }
 
+/// # Safety
+/// `dst` must be valid for writes of `dst_len` bytes and `src` for reads of `src_len` bytes,
+/// without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_swizzle_pitch_to_block_linear(
     dst: *mut u8,
@@ -158,6 +177,9 @@ pub unsafe extern "C" fn ryu_swizzle_pitch_to_block_linear(
     }
 }
 
+/// # Safety
+/// `dst` must be valid for writes of `dst_len` bytes and `src` for reads of `src_len` bytes,
+/// without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_swizzle_pitch_to_block_linear_parallel(
     dst: *mut u8,
@@ -191,5 +213,107 @@ pub unsafe extern "C" fn ryu_swizzle_pitch_to_block_linear_parallel(
     ) {
         Ok(()) => SWIZZLE_STATUS_SUCCESS,
         Err(err) => map_error(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_tegra_swizzle_version(), RYU_TEGRA_SWIZZLE_VERSION);
+        assert_eq!(RYU_TEGRA_SWIZZLE_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        const E: i32 = SWIZZLE_STATUS_NULL_POINTER;
+        // SAFETY: every call passes null for both pointers, which each function rejects
+        // before touching memory.
+        unsafe {
+            assert_eq!(
+                ryu_swizzle_block_linear_to_pitch(null_mut(), 64, null(), 512, 4, 4, 16, 4, 1),
+                E
+            );
+            assert_eq!(
+                ryu_swizzle_block_linear_to_pitch_parallel(
+                    null_mut(),
+                    64,
+                    null(),
+                    512,
+                    4,
+                    4,
+                    16,
+                    4,
+                    1
+                ),
+                E
+            );
+            assert_eq!(
+                ryu_swizzle_pitch_to_block_linear(null_mut(), 512, null(), 64, 4, 4, 16, 4, 1),
+                E
+            );
+            assert_eq!(
+                ryu_swizzle_pitch_to_block_linear_parallel(
+                    null_mut(),
+                    512,
+                    null(),
+                    64,
+                    4,
+                    4,
+                    16,
+                    4,
+                    1
+                ),
+                E
+            );
+        }
+    }
+
+    #[test]
+    fn non_power_of_two_bpp_stays_in_row() {
+        // 3 pixels of 12 bytes: the 4-byte row tail must not run past `width * bpp`.
+        let (w, h, bpp) = (3i32, 2i32, 12i32);
+        let row = (w * bpp) as usize;
+        let linear: Vec<u8> = (0..row * h as usize).map(|i| i as u8).collect();
+        // SAFETY: takes no pointers.
+        let size = unsafe { ryu_swizzle_query_block_linear_size(w, h, 1, bpp, 1, 1) };
+        let mut block = vec![0u8; size];
+        let mut back = vec![0xEEu8; row * h as usize + 16];
+        // SAFETY: every buffer is a distinct local at least as long as the length passed.
+        unsafe {
+            assert_eq!(
+                ryu_swizzle_pitch_to_block_linear(
+                    block.as_mut_ptr(),
+                    size,
+                    linear.as_ptr(),
+                    linear.len(),
+                    w,
+                    h,
+                    row as i32,
+                    bpp,
+                    1
+                ),
+                SWIZZLE_STATUS_SUCCESS
+            );
+            assert_eq!(
+                ryu_swizzle_block_linear_to_pitch(
+                    back.as_mut_ptr(),
+                    linear.len(),
+                    block.as_ptr(),
+                    size,
+                    w,
+                    h,
+                    row as i32,
+                    bpp,
+                    1
+                ),
+                SWIZZLE_STATUS_SUCCESS
+            );
+        }
+        assert_eq!(&back[..linear.len()], &linear[..]);
+        assert!(back[linear.len()..].iter().all(|&b| b == 0xEE));
     }
 }

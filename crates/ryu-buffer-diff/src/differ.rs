@@ -31,6 +31,7 @@ pub fn is_equal_fast(a: &[u8], b: &[u8]) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 was just detected and both slices are `len` bytes long.
             unsafe {
                 return is_equal_avx2(a.as_ptr(), b.as_ptr(), len);
             }
@@ -78,6 +79,7 @@ pub fn find_dirty_range(src: &[u8], dst: &[u8]) -> Option<DirtyRange> {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 was just detected and both slices are at least `len` bytes long.
             unsafe {
                 return find_dirty_range_avx2(src.as_ptr(), dst.as_ptr(), len);
             }
@@ -123,10 +125,7 @@ unsafe fn find_dirty_range_avx2(
         }
     }
 
-    let first = match first_diff {
-        Some(f) => f,
-        None => return None,
-    };
+    let first = first_diff?;
 
     // 2. Backward scan to find last modified byte
     let remainder_start = chunks * 32;
@@ -166,10 +165,7 @@ pub fn find_dirty_range_scalar(src: &[u8], dst: &[u8], len: usize) -> Option<Dir
         }
     }
 
-    let first = match first {
-        Some(f) => f,
-        None => return None,
-    };
+    let first = first?;
 
     let mut last = first;
     for i in (first..len).rev() {

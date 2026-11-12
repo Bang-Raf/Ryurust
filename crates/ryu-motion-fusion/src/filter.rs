@@ -84,6 +84,8 @@ impl Quaternion {
         let yz = y * z;
         let wx = w * x;
 
+        // max/min maps NaN to -1.0 while `f32::clamp` would return NaN; keep the existing result.
+        #[allow(clippy::manual_clamp)]
         let clamp = |v: f32| v.max(-1.0).min(1.0);
 
         [

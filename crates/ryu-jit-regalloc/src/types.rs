@@ -1,6 +1,12 @@
 pub const NOT_FOUND: i32 = -1;
 pub const MAX_REGISTERS: usize = 64;
 
+/// Value returned by [`LinearScanEngine::run_pass`](crate::LinearScanEngine::run_pass) (and
+/// by `ryu_regalloc_run_pass`) when the input cannot be allocated because two fixed
+/// intervals that are live at the same time demand the same register. Read as a signed
+/// integer of any width this is `-1`.
+pub const RUN_PASS_FIXED_CONFLICT: usize = usize::MAX;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisterType {
@@ -49,3 +55,36 @@ pub struct RegisterMasksNative {
     pub vec_available: u32,
     pub registers_count: u32,
 }
+
+/// Two fixed intervals of the same register class are live at the same time and demand the
+/// same register, so no valid allocation exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedRegisterConflict {
+    /// `id` of the conflicting interval that starts first.
+    pub first_id: u32,
+    /// `id` of the interval that starts while `first_id` still holds the register.
+    pub second_id: u32,
+    /// Register class as stored in [`Interval::reg_type`] (0 = Integer, otherwise Vector).
+    pub reg_type: u8,
+    /// The register both intervals are fixed to.
+    pub reg: i16,
+}
+
+impl std::fmt::Display for FixedRegisterConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "fixed intervals {} and {} overlap and both require {} register {}",
+            self.first_id,
+            self.second_id,
+            if self.reg_type == 0 {
+                "integer"
+            } else {
+                "vector"
+            },
+            self.reg
+        )
+    }
+}
+
+impl std::error::Error for FixedRegisterConflict {}

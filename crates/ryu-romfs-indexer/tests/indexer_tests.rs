@@ -79,24 +79,73 @@ fn test_c_abi_lifecycle() {
     builder.add_file(d_sound, "bgm.bfwav", 0x200, 4096);
 
     let romfs_bytes = builder.build_metadata();
-    let handle = ryu_romfs_create(romfs_bytes.as_ptr(), romfs_bytes.len());
-    assert!(!handle.is_null());
+    // SAFETY: valid buffer/handle/C-string/out pointers; the handle is destroyed once at the end.
+    unsafe {
+        let handle = ryu_romfs_create(romfs_bytes.as_ptr(), romfs_bytes.len());
+        assert!(!handle.is_null());
 
-    assert_eq!(ryu_romfs_get_dir_count(handle), 2);
-    assert_eq!(ryu_romfs_get_file_count(handle), 1);
+        assert_eq!(ryu_romfs_get_dir_count(handle), 2);
+        assert_eq!(ryu_romfs_get_file_count(handle), 1);
 
-    let path = CString::new("/Sound/bgm.bfwav").unwrap();
-    let mut offset: u64 = 0;
-    let mut size: u64 = 0;
-    let res = ryu_romfs_find_file(handle, path.as_ptr(), &mut offset, &mut size);
-    assert_eq!(res, 1);
-    assert_eq!(size, 4096);
+        let path = CString::new("/Sound/bgm.bfwav").unwrap();
+        let mut offset: u64 = 0;
+        let mut size: u64 = 0;
+        let res = ryu_romfs_find_file(handle, path.as_ptr(), &mut offset, &mut size);
+        assert_eq!(res, 1);
+        assert_eq!(size, 4096);
 
-    let missing = CString::new("/Sound/missing.wav").unwrap();
-    let res_miss = ryu_romfs_find_file(handle, missing.as_ptr(), &mut offset, &mut size);
-    assert_eq!(res_miss, 0);
+        let missing = CString::new("/Sound/missing.wav").unwrap();
+        let res_miss = ryu_romfs_find_file(handle, missing.as_ptr(), &mut offset, &mut size);
+        assert_eq!(res_miss, 0);
 
-    ryu_romfs_destroy(handle);
+        ryu_romfs_destroy(handle);
+    }
+}
+
+#[test]
+fn test_version_export_returns_constant() {
+    assert_eq!(ryu_romfs_indexer_version(), RYU_ROMFS_INDEXER_VERSION);
+    assert_eq!(RYU_ROMFS_INDEXER_VERSION, 0x0001_0000);
+}
+
+#[test]
+fn test_c_abi_null_pointers() {
+    use std::ptr::{null, null_mut};
+    let mut builder = MockRomFsBuilder::new();
+    builder.add_file(0, "a.bin", 0, 1);
+    let bytes = builder.build_metadata();
+    let path = CString::new("/a.bin").unwrap();
+    // SAFETY: every pointer is either null or valid; the handle is destroyed once.
+    unsafe {
+        assert!(ryu_romfs_create(null(), 0).is_null());
+        assert!(ryu_romfs_create(null(), 0x1000).is_null());
+        ryu_romfs_destroy(null_mut());
+        assert_eq!(ryu_romfs_get_file_count(null()), 0);
+        assert_eq!(ryu_romfs_get_dir_count(null()), 0);
+        assert_eq!(
+            ryu_romfs_find_file(null(), path.as_ptr(), null_mut(), null_mut()),
+            -1
+        );
+        assert_eq!(
+            ryu_romfs_find_file(null(), null(), null_mut(), null_mut()),
+            -1
+        );
+        assert_eq!(ryu_romfs_hash(5, null(), 0), romfs_hash(5, b""));
+        assert_eq!(ryu_romfs_hash(5, null(), 16), romfs_hash(5, b""));
+
+        let handle = ryu_romfs_create(bytes.as_ptr(), bytes.len());
+        assert!(!handle.is_null());
+        assert_eq!(
+            ryu_romfs_find_file(handle, null(), null_mut(), null_mut()),
+            -1
+        );
+        // Null outputs are optional: the lookup still succeeds.
+        assert_eq!(
+            ryu_romfs_find_file(handle, path.as_ptr(), null_mut(), null_mut()),
+            1
+        );
+        ryu_romfs_destroy(handle);
+    }
 }
 
 /// Known values from the LibHac formula (`hash = 123456789 ^ parent; hash = c ^ rotr(hash, 5)`),
@@ -108,11 +157,14 @@ fn test_romfs_hash_known_values() {
     assert_eq!(romfs_hash(0, b"a"), 2_822_430_217);
     assert_eq!(romfs_hash(0, b"data"), 0x0459_5017);
     assert_eq!(romfs_hash(0x18, b"sound.bin"), 0xABB2_4C6A);
-    assert_eq!(ryu_romfs_hash(7, std::ptr::null(), 0), 7 ^ 123_456_789);
-    assert_eq!(
-        ryu_romfs_hash(0x18, b"sound.bin".as_ptr(), 9),
-        romfs_hash(0x18, b"sound.bin")
-    );
+    // SAFETY: null with length 0, and a 9-byte literal with length 9.
+    unsafe {
+        assert_eq!(ryu_romfs_hash(7, std::ptr::null(), 0), 7 ^ 123_456_789);
+        assert_eq!(
+            ryu_romfs_hash(0x18, b"sound.bin".as_ptr(), 9),
+            romfs_hash(0x18, b"sound.bin")
+        );
+    }
 }
 
 #[test]

@@ -30,6 +30,8 @@ fn step1_test_query_block_linear_size() {
 
 #[test]
 fn step1_test_ffi_null_and_bounds_safety() {
+    // SAFETY: pointers are null (rejected) or point at locals/temporaries that outlive the call
+    // and are at least as long as the lengths passed.
     unsafe {
         // Null pointers
         assert_eq!(

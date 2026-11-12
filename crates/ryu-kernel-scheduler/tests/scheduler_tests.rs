@@ -158,20 +158,22 @@ fn test_c_abi_lifecycle() {
     assert!(!s.is_null());
 
     assert_eq!(ryu_scheduler_version(), 0x00010000);
-    assert_eq!(ryu_scheduler_has_scheduled(s, 0), 0);
+    unsafe {
+        assert_eq!(ryu_scheduler_has_scheduled(s, 0), 0);
 
-    ryu_scheduler_schedule(s, 4, 0, 888);
-    ryu_scheduler_schedule(s, 2, 0, 999);
+        ryu_scheduler_schedule(s, 4, 0, 888);
+        ryu_scheduler_schedule(s, 2, 0, 999);
 
-    assert_eq!(ryu_scheduler_has_scheduled(s, 0), 1);
-    assert_eq!(ryu_scheduler_first_scheduled(s, 0), 999); // Prio 2 is higher than 4
-    assert_eq!(ryu_scheduler_element_at_scheduled(s, 0, 1), 888);
+        assert_eq!(ryu_scheduler_has_scheduled(s, 0), 1);
+        assert_eq!(ryu_scheduler_first_scheduled(s, 0), 999); // Prio 2 is higher than 4
+        assert_eq!(ryu_scheduler_element_at_scheduled(s, 0, 1), 888);
 
-    let mut buf = [0u64; 4];
-    let exported = ryu_scheduler_export_scheduled(s, 0, buf.as_mut_ptr(), 4);
-    assert_eq!(exported, 2);
-    assert_eq!(buf[0], 999);
-    assert_eq!(buf[1], 888);
+        let mut buf = [0u64; 4];
+        let exported = ryu_scheduler_export_scheduled(s, 0, buf.as_mut_ptr(), 4);
+        assert_eq!(exported, 2);
+        assert_eq!(buf[0], 999);
+        assert_eq!(buf[1], 888);
 
-    ryu_scheduler_destroy(s);
+        ryu_scheduler_destroy(s);
+    }
 }

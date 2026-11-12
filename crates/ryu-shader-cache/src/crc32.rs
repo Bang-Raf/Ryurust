@@ -35,8 +35,8 @@ pub fn compute_crc32(data: &[u8]) -> u32 {
     let t = &CRC32_TABLES;
     let mut crc = 0xFFFF_FFFFu32;
 
-    let mut chunks = data.chunks_exact(8);
-    for c in &mut chunks {
+    let (chunks, rest) = data.as_chunks::<8>();
+    for c in chunks {
         let lo = crc ^ u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
         let hi = u32::from_le_bytes([c[4], c[5], c[6], c[7]]);
         crc = t[7][(lo & 0xFF) as usize]
@@ -48,7 +48,7 @@ pub fn compute_crc32(data: &[u8]) -> u32 {
             ^ t[1][((hi >> 16) & 0xFF) as usize]
             ^ t[0][(hi >> 24) as usize];
     }
-    for &b in chunks.remainder() {
+    for &b in rest {
         let idx = ((crc ^ (b as u32)) & 0xFF) as usize;
         crc = (crc >> 8) ^ t[0][idx];
     }

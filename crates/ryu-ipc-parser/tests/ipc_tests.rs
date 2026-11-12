@@ -137,9 +137,11 @@ fn test_tipc_message_parse() {
 
 #[test]
 fn test_cmif_round_trip_serialization() {
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = 4;
-    msg.handle_desc_enabled = 1;
+    let mut msg = ParsedIpcMessage {
+        msg_type: 4,
+        handle_desc_enabled: 1,
+        ..Default::default()
+    };
     msg.handle_desc.has_pid = 1;
     msg.handle_desc.pid = 987654321;
     msg.handle_desc.copy_count = 1;
@@ -170,9 +172,11 @@ fn test_cmif_round_trip_serialization() {
 
 #[test]
 fn test_ffi_c_abi() {
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = 0x10; // TIPC Command
-    msg.handle_desc_enabled = 1;
+    let mut msg = ParsedIpcMessage {
+        msg_type: 0x10, // TIPC Command
+        handle_desc_enabled: 1,
+        ..Default::default()
+    };
     msg.handle_desc.copy_count = 1;
     msg.handle_desc.copy_handles[0] = 55;
 
@@ -243,9 +247,11 @@ fn test_truncated_buffer_handling() {
 fn test_cmif_padding_variations() {
     // Test that pad0 varies properly with (pos + cmd_ptr)
     for cmd_ptr in [0i64, 4, 8, 12, 15, 16, 23] {
-        let mut msg = ParsedIpcMessage::default();
-        msg.msg_type = 4;
-        msg.ptr_buff_count = 1;
+        let mut msg = ParsedIpcMessage {
+            msg_type: 4,
+            ptr_buff_count: 1,
+            ..Default::default()
+        };
         msg.ptr_buffs[0] = IpcPtrBufferDesc {
             position: 0x1234_5678,
             size: 32,
@@ -346,9 +352,11 @@ fn assert_abw_eq(a: &ParsedIpcMessage, b: &ParsedIpcMessage) {
 #[test]
 fn test_cmif_round_trip_with_abw_descriptors() {
     for cmd_ptr in [0i64, 4, 8, 12, 0x1234_5670 + 0xc] {
-        let mut msg = ParsedIpcMessage::default();
-        msg.msg_type = 4;
-        msg.handle_desc_enabled = 1;
+        let mut msg = ParsedIpcMessage {
+            msg_type: 4,
+            handle_desc_enabled: 1,
+            ..Default::default()
+        };
         msg.handle_desc.has_pid = 1;
         msg.handle_desc.pid = 42;
         msg.handle_desc.move_count = 2;
@@ -387,9 +395,11 @@ fn test_cmif_round_trip_with_abw_descriptors() {
 
 #[test]
 fn test_tipc_round_trip_with_abw_descriptors() {
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = 0x10;
-    msg.handle_desc_enabled = 1;
+    let mut msg = ParsedIpcMessage {
+        msg_type: 0x10,
+        handle_desc_enabled: 1,
+        ..Default::default()
+    };
     msg.handle_desc.copy_count = 1;
     msg.handle_desc.copy_handles[0] = 55;
     fill_abw(&mut msg);
@@ -424,9 +434,11 @@ fn test_tipc_round_trip_with_abw_descriptors() {
 #[test]
 fn test_serialize_rejects_counts_over_header_width() {
     let mut out = [0u8; 4096];
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = 4;
-    msg.send_buff_count = 16;
+    let msg = ParsedIpcMessage {
+        msg_type: 4,
+        send_buff_count: 16,
+        ..Default::default()
+    };
     assert_eq!(
         serialize_cmif(&msg, &[], 0, 0, &mut out),
         Err(IpcSerializeError::InvalidData)
@@ -436,8 +448,10 @@ fn test_serialize_rejects_counts_over_header_width() {
         Err(IpcSerializeError::InvalidData)
     );
 
-    let mut msg = ParsedIpcMessage::default();
-    msg.handle_desc_enabled = 1;
+    let mut msg = ParsedIpcMessage {
+        handle_desc_enabled: 1,
+        ..Default::default()
+    };
     msg.handle_desc.copy_count = 16;
     assert_eq!(
         serialize_cmif(&msg, &[], 0, 0, &mut out),
@@ -445,12 +459,30 @@ fn test_serialize_rejects_counts_over_header_width() {
     );
 
     // Too-small output buffer accounts for the descriptor bytes.
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = 0x10;
+    let mut msg = ParsedIpcMessage {
+        msg_type: 0x10,
+        ..Default::default()
+    };
     fill_abw(&mut msg);
     let mut small = [0u8; 8 + 6 * 12 - 1];
     assert_eq!(
         serialize_tipc(&msg, &[], &mut small),
         Err(IpcSerializeError::OutputBufferTooSmall)
+    );
+}
+
+#[test]
+fn test_tipc_rejects_pointer_buffers() {
+    // TIPC has no X descriptors; C# asserts there are none. Dropping them silently would
+    // send a message the guest did not ask for.
+    let msg = ParsedIpcMessage {
+        msg_type: 0x10,
+        ptr_buff_count: 1,
+        ..Default::default()
+    };
+    let mut out = [0u8; 256];
+    assert_eq!(
+        serialize_tipc(&msg, &[], &mut out),
+        Err(IpcSerializeError::InvalidData)
     );
 }

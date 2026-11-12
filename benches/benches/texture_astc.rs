@@ -30,7 +30,8 @@ fn is_void_extent(block: &[u8; 16]) -> bool {
 
 /// Pool of pseudo-random 16-byte blocks that take the general (endpoint + weight)
 /// decode path rather than the void-extent shortcut. Blocks the decoder rejects are
-/// still included: they decode to the ASTC error colour, as real malformed data would.
+/// still included: they decode to the ASTC error colour, as real malformed data would,
+/// and make the whole decode report failure.
 fn general_block_pool(bw: usize, bh: usize, pool_size: usize) -> Vec<[u8; 16]> {
     let mut rng = Lcg(0x5EED_A57C ^ ((bw as u64) << 8 | bh as u64));
     let mut pool = Vec::with_capacity(pool_size);
@@ -56,7 +57,7 @@ fn texture_from_pool(pool: &[[u8; 16]], blocks: usize) -> Vec<u8> {
 
 fn void_extent_texture(blocks: usize) -> Vec<u8> {
     let mut data = vec![0u8; blocks * 16];
-    for (i, block) in data.chunks_exact_mut(16).enumerate() {
+    for (i, block) in data.as_chunks_mut::<16>().0.iter_mut().enumerate() {
         let v = ((i * 37) & 0xFFFF) as u16;
         block[0] = 0xFC;
         block[1] = 0xFD;
@@ -88,22 +89,14 @@ fn bench(c: &mut Criterion) {
         let input = texture_from_pool(&pool, blocks);
         let label = format!("{bw}x{bh}_1920x1080");
 
-        // Sequential and parallel decoders must agree.
+        // Sequential and parallel decoders must agree. The random pool contains illegal
+        // blocks, so both report failure (as the C# decoder would).
         let mut check = vec![0u8; out_size];
-        assert!(decode_astc_to_rgba8(
-            &input,
-            &mut output,
-            bw,
-            bh,
-            WIDTH,
-            HEIGHT,
-            1,
-            1,
-            1
-        ));
-        assert!(decode_astc_to_rgba8_parallel(
-            &input, &mut check, bw, bh, WIDTH, HEIGHT, 1, 1, 1
-        ));
+        let ok_seq = decode_astc_to_rgba8(&input, &mut output, bw, bh, WIDTH, HEIGHT, 1, 1, 1);
+        let ok_par =
+            decode_astc_to_rgba8_parallel(&input, &mut check, bw, bh, WIDTH, HEIGHT, 1, 1, 1);
+        assert!(!ok_seq);
+        assert_eq!(ok_seq, ok_par);
         assert_eq!(output, check);
 
         group.bench_with_input(

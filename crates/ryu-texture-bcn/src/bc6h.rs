@@ -495,7 +495,7 @@ pub fn decode_end_points(
             r0 = (bit_reverse_6(((low >> 39) as i32) & 0x3F) << 10) | (((low >> 5) as i32) & 0x3FF);
             g0 =
                 (bit_reverse_6(((low >> 49) as i32) & 0x3F) << 10) | (((low >> 15) as i32) & 0x3FF);
-            b0 = ((bit_reverse_6(((low >> 59) as i32)) | ((high & 1) as i32)) << 10)
+            b0 = ((bit_reverse_6((low >> 59) as i32) | ((high & 1) as i32)) << 10)
                 | (((low >> 25) as i32) & 0x3FF);
 
             if signed {
@@ -753,7 +753,7 @@ pub fn decode_end_points(
         }
     }
 
-    return subset_count;
+    subset_count
 }
 
 pub fn decode_bc6h_block(block: Block, output: &mut [u64; 16], signed: bool) {
@@ -821,8 +821,8 @@ pub fn decode_bc6h_surface(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 16;
     let expected_dst = width * height * 8;
     if src.len() < expected_src {

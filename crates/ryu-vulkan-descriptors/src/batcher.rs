@@ -323,6 +323,9 @@ impl RyuDescriptorState {
             return 0;
         }
 
+        // SAFETY: `source_slice` is exactly `bytes_needed` bytes of padding-free
+        // `repr(C)` data, `out_buf` was checked to hold at least that many, and a
+        // `&mut` destination cannot overlap the shared source.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 source_slice.as_ptr() as *const u8,

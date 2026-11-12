@@ -5,11 +5,20 @@ use std::slice;
 
 pub const RYU_IPC_VERSION: u32 = 0x0001_0000;
 
+/// Kept for compatibility with existing bindings; same value as `ryu_ipc_parser_version`.
 #[no_mangle]
 pub extern "C" fn ryu_ipc_version() -> u32 {
     RYU_IPC_VERSION
 }
 
+#[no_mangle]
+pub extern "C" fn ryu_ipc_parser_version() -> u32 {
+    RYU_IPC_VERSION
+}
+
+/// # Safety
+/// `data` must be valid for reads of `data_len` bytes and `out` for writing one
+/// `ParsedIpcMessage`. Either being null returns -1.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_ipc_parse(
     data: *const u8,
@@ -31,6 +40,10 @@ pub unsafe extern "C" fn ryu_ipc_parse(
     }
 }
 
+/// # Safety
+/// `msg` must point to a valid `ParsedIpcMessage`, `raw_data` must be null or valid for
+/// reads of `raw_len` bytes, `out_buf` valid for writes of `out_cap` bytes (not
+/// overlapping the inputs) and `out_len` for writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_ipc_serialize_cmif(
     msg: *const ParsedIpcMessage,
@@ -63,6 +76,10 @@ pub unsafe extern "C" fn ryu_ipc_serialize_cmif(
     }
 }
 
+/// # Safety
+/// `msg` must point to a valid `ParsedIpcMessage`, `raw_data` must be null or valid for
+/// reads of `raw_len` bytes, `out_buf` valid for writes of `out_cap` bytes (not
+/// overlapping the inputs) and `out_len` for writing one `usize`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_ipc_serialize_tipc(
     msg: *const ParsedIpcMessage,
@@ -93,6 +110,9 @@ pub unsafe extern "C" fn ryu_ipc_serialize_tipc(
     }
 }
 
+/// # Safety
+/// `msg` must point to a valid `ParsedIpcMessage`; `out_pos` and `out_size` must each be
+/// valid for writing one `u64`. Any of them being null returns -1.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_ipc_get_buffer_0x21(
     msg: *const ParsedIpcMessage,
@@ -124,6 +144,9 @@ pub unsafe extern "C" fn ryu_ipc_get_buffer_0x21(
     0
 }
 
+/// # Safety
+/// `msg` must point to a valid `ParsedIpcMessage`; `out_pos` and `out_size` must each be
+/// valid for writing one `u64`. Any of them being null returns -1.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_ipc_get_buffer_0x22(
     msg: *const ParsedIpcMessage,
@@ -153,4 +176,128 @@ pub unsafe extern "C" fn ryu_ipc_get_buffer_0x22(
     *out_pos = 0;
     *out_size = 0;
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn version_matches_constant() {
+        assert_eq!(ryu_ipc_parser_version(), RYU_IPC_VERSION);
+        assert_eq!(ryu_ipc_version(), RYU_IPC_VERSION);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        let data = [0u8; 16];
+        let mut msg = ParsedIpcMessage::default();
+        let mut out = [0u8; 64];
+        let mut out_len = 0usize;
+        let (mut pos, mut size) = (0u64, 0u64);
+        unsafe {
+            assert_eq!(ryu_ipc_parse(ptr::null(), 16, 0, &mut msg), -1);
+            assert_eq!(ryu_ipc_parse(data.as_ptr(), 16, 0, ptr::null_mut()), -1);
+
+            assert_eq!(
+                ryu_ipc_serialize_cmif(
+                    ptr::null(),
+                    data.as_ptr(),
+                    16,
+                    0,
+                    0,
+                    out.as_mut_ptr(),
+                    out.len(),
+                    &mut out_len
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_serialize_cmif(
+                    &msg,
+                    data.as_ptr(),
+                    16,
+                    0,
+                    0,
+                    ptr::null_mut(),
+                    out.len(),
+                    &mut out_len
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_serialize_cmif(
+                    &msg,
+                    data.as_ptr(),
+                    16,
+                    0,
+                    0,
+                    out.as_mut_ptr(),
+                    out.len(),
+                    ptr::null_mut()
+                ),
+                -1
+            );
+
+            assert_eq!(
+                ryu_ipc_serialize_tipc(
+                    ptr::null(),
+                    data.as_ptr(),
+                    16,
+                    out.as_mut_ptr(),
+                    out.len(),
+                    &mut out_len
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_serialize_tipc(
+                    &msg,
+                    data.as_ptr(),
+                    16,
+                    ptr::null_mut(),
+                    out.len(),
+                    &mut out_len
+                ),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_serialize_tipc(
+                    &msg,
+                    data.as_ptr(),
+                    16,
+                    out.as_mut_ptr(),
+                    out.len(),
+                    ptr::null_mut()
+                ),
+                -1
+            );
+
+            assert_eq!(
+                ryu_ipc_get_buffer_0x21(ptr::null(), 0, &mut pos, &mut size),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_get_buffer_0x21(&msg, 0, ptr::null_mut(), &mut size),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_get_buffer_0x21(&msg, 0, &mut pos, ptr::null_mut()),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_get_buffer_0x22(ptr::null(), 0, &mut pos, &mut size),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_get_buffer_0x22(&msg, 0, ptr::null_mut(), &mut size),
+                -1
+            );
+            assert_eq!(
+                ryu_ipc_get_buffer_0x22(&msg, 0, &mut pos, ptr::null_mut()),
+                -1
+            );
+        }
+    }
 }

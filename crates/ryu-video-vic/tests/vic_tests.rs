@@ -32,6 +32,7 @@ fn test_step1_null_pointer_safety() {
     let rect = VicRectangle::default();
     let matrix = VicColorMatrix::default();
 
+    // SAFETY: null surfaces are rejected before use; `rect` and `matrix` are valid locals.
     unsafe {
         assert_eq!(
             ryu_vic_blend_surface(
@@ -83,6 +84,8 @@ fn test_step1_empty_dimensions_handling() {
     let rect = VicRectangle::default();
     let matrix = VicColorMatrix::default();
 
+    // SAFETY: `dst`/`src` are distinct 16-pixel locals and the lengths passed match them;
+    // `rect` and `matrix` are valid locals.
     unsafe {
         assert_eq!(
             ryu_vic_blend_surface(
@@ -254,8 +257,8 @@ fn test_step2_deinterlace_weave_and_bob_deterministic() {
     );
 
     let mut data_bob = vec![0u8; total_size];
-    for i in 0..width {
-        data_bob[i] = (i * 3) as u8;
+    for (i, px) in data_bob[..width].iter_mut().enumerate() {
+        *px = (i * 3) as u8;
     }
 
     deinterlace_bob(&mut data_bob, width, field_size, true);
@@ -277,8 +280,8 @@ fn test_step2_deinterlace_motion_adaptive_differential() {
     let mut next_data = vec![50u8; total_size];
 
     // Introduce motion in second half
-    for i in 32..64 {
-        next_data[i] = 75; // changed between prev and next -> should trigger Bob!
+    for px in &mut next_data[32..64] {
+        *px = 75; // changed between prev and next -> should trigger Bob!
     }
 
     deinterlace_motion_adaptive(&mut data, &prev_data, &next_data, width, field_size, true);

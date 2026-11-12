@@ -9,16 +9,33 @@ pub const AUDIO_STATUS_SUCCESS: i32 = 0;
 pub const AUDIO_STATUS_NULL_POINTER: i32 = -1;
 pub const AUDIO_STATUS_INVALID_ARGUMENT: i32 = -2;
 
+pub const RYU_AUDIO_RESAMPLER_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_audio_resampler_version() -> u32 {
+    RYU_AUDIO_RESAMPLER_VERSION
+}
+
+/// # Safety
+/// This function takes no pointers and has no requirements; it is `unsafe` only because it
+/// was originally exported that way.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_adpcm_get_nibbles_from_sample_count(sample_count: usize) -> usize {
     get_nibbles_from_sample_count(sample_count)
 }
 
+/// # Safety
+/// This function takes no pointers and has no requirements; it is `unsafe` only because it
+/// was originally exported that way.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_adpcm_get_data_size(sample_count: usize) -> usize {
     get_adpcm_data_size(sample_count)
 }
 
+/// # Safety
+/// `output` must be valid for writes of `output_len` floats and `input` for reads of
+/// `input_len` samples, without overlapping. `fraction_ptr` must point to a valid float that
+/// is read and written.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_audio_resample(
     output: *mut f32,
@@ -58,6 +75,11 @@ pub unsafe extern "C" fn ryu_audio_resample(
     AUDIO_STATUS_SUCCESS
 }
 
+/// # Safety
+/// `output` must be valid for writes of `output_len` samples, `input` for reads of `input_len`
+/// bytes and `coefficients` for reads of `coeff_len` values, with `output` overlapping neither
+/// of the others. `loop_context` must point to a valid `AdpcmLoopContext` not accessed by
+/// anything else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_adpcm_decode(
     output: *mut i16,
@@ -93,4 +115,32 @@ pub unsafe extern "C" fn ryu_adpcm_decode(
         coeff_slice,
         &mut *loop_context,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_audio_resampler_version(), RYU_AUDIO_RESAMPLER_VERSION);
+        assert_eq!(RYU_AUDIO_RESAMPLER_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(
+                ryu_audio_resample(null_mut(), 4, null(), 4, 1.0, null_mut(), 4, 0),
+                AUDIO_STATUS_NULL_POINTER
+            );
+            assert_eq!(
+                ryu_adpcm_decode(null_mut(), 4, null(), 4, 0, 0, 0, 4, null(), 16, null_mut()),
+                AUDIO_STATUS_NULL_POINTER
+            );
+        }
+    }
 }

@@ -103,7 +103,7 @@ impl MmeInterpreter {
 
     #[inline(always)]
     fn set_meth_addr(&mut self, value: i32) {
-        self.meth_addr = (value >> 0) & 0xfff;
+        self.meth_addr = value & 0xfff;
         self.meth_incr = (value >> 12) & 0x3f;
     }
 
@@ -153,7 +153,7 @@ impl MmeInterpreter {
                 // AddImmediate
                 self.get_gpr_a().wrapping_add(self.get_imm())
             }
-            2 | 3 | 4 => {
+            2..=4 => {
                 // Bitfield operations
                 let bf_src_bit = ((self.op_code >> 17) & 0x1f) as u32;
                 let bf_size = ((self.op_code >> 22) & 0x1f) as u32;

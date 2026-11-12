@@ -109,7 +109,9 @@ impl<'a> ParcelReader<'a> {
         let slice = self.read_bytes_inplace(byte_len)?;
         // Decode UTF-16LE ignoring last null character
         let u16_chars: Vec<u16> = slice[..(char_len as usize) * 2]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
         String::from_utf16(&u16_chars).ok()

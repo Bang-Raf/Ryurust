@@ -14,6 +14,7 @@ pub fn clamp_sbyte(t: i32) -> i8 {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // one parameter per tap, mirroring the libvpx / C# Vp9 loop filter helper
 #[inline(always)]
 pub fn filter_mask(
     limit: u8,
@@ -68,6 +69,7 @@ pub fn filter_mask(
     (!mask) as i8
 }
 
+#[allow(clippy::too_many_arguments)] // one parameter per tap, mirroring the libvpx / C# Vp9 loop filter helper
 #[inline(always)]
 pub fn flat_mask4(
     thresh: u8,
@@ -114,6 +116,7 @@ pub fn flat_mask4(
     (!mask) as i8
 }
 
+#[allow(clippy::too_many_arguments)] // one parameter per tap, mirroring the libvpx / C# Vp9 loop filter helper
 #[inline(always)]
 pub fn flat_mask5(
     thresh: u8,
@@ -179,6 +182,7 @@ pub fn filter4(mask: i8, thresh: u8, op1: &mut u8, op0: &mut u8, oq0: &mut u8, o
     *op0 = (clamp_sbyte(ps0 as i32 + filter2 as i32) as u8) ^ 0x80;
 }
 
+#[allow(clippy::too_many_arguments)] // one parameter per tap, mirroring the libvpx / C# Vp9 loop filter helper
 #[inline(always)]
 pub fn filter8(
     mask: i8,
@@ -215,6 +219,7 @@ pub fn filter8(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // one parameter per tap, mirroring the libvpx / C# Vp9 loop filter helper
 #[inline(always)]
 pub fn filter16(
     mask: i8,
@@ -676,7 +681,7 @@ pub fn compute_loop_filter_limits(level: u8, sharpness: u8) -> (u8, u8, u8) {
 
     let limit = inside_limit as u8;
     let blimit = ((2 * (level as i32 + 2)) + inside_limit).min(255) as u8;
-    let thresh = (level >> 4) as u8;
+    let thresh = level >> 4;
 
     (blimit, limit, thresh)
 }
@@ -715,6 +720,7 @@ pub fn loop_filter_plane(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // backs the `ryu_nvdec_vp9_loop_filter_frame` C ABI parameter list
 pub fn loop_filter_frame(
     y_plane: &mut [u8],
     u_plane: &mut [u8],

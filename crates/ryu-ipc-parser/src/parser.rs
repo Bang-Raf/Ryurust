@@ -65,13 +65,15 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
     let recv_buff_count = ((word0 >> 24) & 0xf) as usize;
     let xchg_buff_count = ((word0 >> 28) & 0xf) as usize;
 
-    let mut raw_data_size = (((word1 >> 0) & 0x3ff) * 4) as usize;
+    let mut raw_data_size = ((word1 & 0x3ff) * 4) as usize;
     let recv_list_flags = ((word1 >> 10) & 0xf) as i32;
     let hnd_desc_enable = ((word1 >> 31) & 0x1) != 0;
 
-    let mut msg = ParsedIpcMessage::default();
-    msg.msg_type = msg_type;
-    msg.handle_desc_enabled = if hnd_desc_enable { 1 } else { 0 };
+    let mut msg = ParsedIpcMessage {
+        msg_type,
+        handle_desc_enabled: if hnd_desc_enable { 1 } else { 0 },
+        ..Default::default()
+    };
 
     if hnd_desc_enable {
         let word = read_u32(data, &mut pos)?;
@@ -110,7 +112,7 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
         position |= (w0 << 20) & 0x0f_0000_0000;
         position |= (w0 << 30) & 0x70_0000_0000;
 
-        let mut index = ((w0 as u32) >> 0) & 0x03f;
+        let mut index = (w0 as u32) & 0x03f;
         index |= ((w0 as u32) >> 3) & 0x1c0;
 
         let size = (w0 >> 16) as u16 as u64;
@@ -145,8 +147,9 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
 
             let flags = (w2 & 3) as u8;
 
-            if i < MAX_BUFFERS {
-                out[i] = IpcBufferDesc {
+            // Entries past MAX_BUFFERS are still consumed from `data` but dropped.
+            if let Some(slot) = out.get_mut(i) {
+                *slot = IpcBufferDesc {
                     position,
                     size,
                     flags,

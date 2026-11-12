@@ -78,6 +78,7 @@ impl RefCircularSpanPool {
 
 #[test]
 fn test_step1_span_pool_null_and_bounds() {
+    // SAFETY: only null handles are passed; they are rejected before use.
     unsafe {
         assert!(ryu_span_pool_create(0).is_null());
         assert_eq!(
@@ -94,6 +95,7 @@ fn test_step1_span_pool_null_and_bounds() {
 
 #[test]
 fn test_step1_spsc_null_and_bounds() {
+    // SAFETY: only null handles are passed; they are rejected before use.
     unsafe {
         assert!(ryu_spsc_create(0, 64).is_null());
         assert!(ryu_spsc_create(100, 0).is_null());
@@ -145,6 +147,7 @@ fn test_step2_span_pool_wraparound_bit_identical() {
         let ref_data = ref_pool.get(chunk.len());
         let rust_ptr = rust_pool.get_consumer_ptr(chunk.len());
         assert!(!rust_ptr.is_null());
+        // SAFETY: non-null, so it points to `chunk.len()` readable bytes inside the pool.
         let rust_slice = unsafe { std::slice::from_raw_parts(rust_ptr, chunk.len()) };
 
         assert_eq!(ref_data, rust_slice, "Pool contents must be bit-identical");
@@ -176,6 +179,7 @@ fn test_step2_spsc_multithreaded_fifo_order() {
             }
 
             let ptr = q_producer.get_slot_ptr(slot as usize) as *mut u64;
+            // SAFETY: the reserved slot is 8 bytes and owned by the producer until commit.
             unsafe {
                 *ptr = i as u64;
             }
@@ -196,6 +200,7 @@ fn test_step2_spsc_multithreaded_fifo_order() {
             }
 
             let ptr = q_consumer.get_slot_ptr(slot as usize) as *const u64;
+            // SAFETY: the consumed slot is 8 bytes and owned by the consumer until release.
             let val = unsafe { *ptr };
             received.push(val);
             q_consumer.release();
@@ -237,6 +242,7 @@ fn test_span_pool_exact_fit_at_end_not_wrapped() {
 
     // Consumer sees the exact-fit payload at 48, then wraps to 0.
     let p = pool.get_consumer_ptr(16);
+    // SAFETY: offset 48 is inside the 64-byte pool.
     assert_eq!(p, unsafe { pool.pool_buffer_ptr().add(48) });
     // SAFETY: p points to 16 readable bytes inside the pool.
     assert_eq!(unsafe { std::slice::from_raw_parts(p, 16) }, &exact);

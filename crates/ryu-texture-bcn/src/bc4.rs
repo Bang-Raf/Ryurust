@@ -9,17 +9,17 @@ pub fn bcn_lerp_alpha_snorm(a0_u: u8, a1_u: u8, pal: &mut [u8; 8]) {
     pal[0] = a0_u;
     pal[1] = a1_u;
     if a0 > a1 {
-        pal[2] = (((6 * a0) + (1 * a1)) / 7) as i8 as u8;
+        pal[2] = (((6 * a0) + a1) / 7) as i8 as u8;
         pal[3] = (((5 * a0) + (2 * a1)) / 7) as i8 as u8;
         pal[4] = (((4 * a0) + (3 * a1)) / 7) as i8 as u8;
         pal[5] = (((3 * a0) + (4 * a1)) / 7) as i8 as u8;
         pal[6] = (((2 * a0) + (5 * a1)) / 7) as i8 as u8;
-        pal[7] = (((1 * a0) + (6 * a1)) / 7) as i8 as u8;
+        pal[7] = ((a0 + (6 * a1)) / 7) as i8 as u8;
     } else {
-        pal[2] = (((4 * a0) + (1 * a1)) / 5) as i8 as u8;
+        pal[2] = (((4 * a0) + a1) / 5) as i8 as u8;
         pal[3] = (((3 * a0) + (2 * a1)) / 5) as i8 as u8;
         pal[4] = (((2 * a0) + (3 * a1)) / 5) as i8 as u8;
-        pal[5] = (((1 * a0) + (4 * a1)) / 5) as i8 as u8;
+        pal[5] = ((a0 + (4 * a1)) / 5) as i8 as u8;
         pal[6] = 0x80;
         pal[7] = 0x7f;
     }
@@ -38,8 +38,8 @@ pub fn decode_bc4_block(input: &[u8; 8], output: &mut [u8; 16], signed: bool) {
 
     let word = u64::from_le_bytes(input[0..8].try_into().unwrap());
     let mut indices = word >> 16;
-    for i in 0..16 {
-        output[i] = pal[(indices & 7) as usize];
+    for out in output.iter_mut() {
+        *out = pal[(indices & 7) as usize];
         indices >>= 3;
     }
 }
@@ -55,8 +55,8 @@ pub fn decode_bc4_surface_stride(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 8;
     let expected_dst = stride * height;
     if src.len() < expected_src {

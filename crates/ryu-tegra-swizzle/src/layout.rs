@@ -57,7 +57,7 @@ impl BlockLinearLayout {
         offset += (yh & self.bh_mask) * GOB_SIZE;
         offset += ((z & self.bd_mask) * GOB_SIZE) << self.bh_shift;
         offset += ((y & 0x07) >> 1) << 6;
-        offset += ((y & 0x01) >> 0) << 4;
+        offset += (y & 0x01) << 4;
         offset
     }
 

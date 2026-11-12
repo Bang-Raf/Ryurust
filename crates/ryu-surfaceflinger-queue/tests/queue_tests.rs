@@ -117,23 +117,25 @@ fn test_c_abi_lifecycle() {
     let q = ryu_sf_queue_create(3);
     assert!(!q.is_null());
 
-    let slot = ryu_sf_queue_dequeue_slot(q, 3);
-    assert!(slot >= 0 && slot < 3);
+    unsafe {
+        let slot = ryu_sf_queue_dequeue_slot(q, 3);
+        assert!((0..3).contains(&slot));
 
-    assert_eq!(ryu_sf_queue_queue_buffer(q, slot, 10, 9999, 0, 0), 1);
+        assert_eq!(ryu_sf_queue_queue_buffer(q, slot, 10, 9999, 0, 0), 1);
 
-    let mut item = QueueItem::default();
-    assert_eq!(ryu_sf_queue_acquire_buffer(q, &mut item), 1);
-    assert_eq!(item.slot, slot);
-    assert_eq!(item.frame_number, 10);
+        let mut item = QueueItem::default();
+        assert_eq!(ryu_sf_queue_acquire_buffer(q, &mut item), 1);
+        assert_eq!(item.slot, slot);
+        assert_eq!(item.frame_number, 10);
 
-    assert_eq!(ryu_sf_queue_release_buffer(q, slot), 1);
+        assert_eq!(ryu_sf_queue_release_buffer(q, slot), 1);
 
-    let (mut f, mut d, mut qu, mut a) = (0, 0, 0, 0);
-    ryu_sf_queue_get_counts(q, &mut f, &mut d, &mut qu, &mut a);
-    assert_eq!((f, d, qu, a), (3, 0, 0, 0));
+        let (mut f, mut d, mut qu, mut a) = (0, 0, 0, 0);
+        ryu_sf_queue_get_counts(q, &mut f, &mut d, &mut qu, &mut a);
+        assert_eq!((f, d, qu, a), (3, 0, 0, 0));
 
-    ryu_sf_queue_destroy(q);
+        ryu_sf_queue_destroy(q);
+    }
 }
 
 fn item(slot: usize, frame: u64) -> QueueItem {
@@ -177,8 +179,10 @@ fn test_queue_rejects_slot_not_dequeued() {
     assert_eq!(q.get_counts(), (4, 0, 0, 0));
 
     let c_ffi = ryu_sf_queue_create(2);
-    assert_eq!(ryu_sf_queue_queue_buffer(c_ffi, 0, 1, 1, 0, 0), 0);
-    ryu_sf_queue_destroy(c_ffi);
+    unsafe {
+        assert_eq!(ryu_sf_queue_queue_buffer(c_ffi, 0, 1, 1, 0, 0), 0);
+        ryu_sf_queue_destroy(c_ffi);
+    }
 }
 
 #[test]
@@ -225,7 +229,7 @@ fn test_two_thread_stress_no_slot_leak() {
                 continue;
             };
             // Occasionally cancel instead of queuing.
-            if frame % 97 == 0 && cancels < frame / 97 {
+            if frame.is_multiple_of(97) && cancels < frame / 97 {
                 cancels += 1;
                 assert!(q_prod.cancel_buffer(slot));
                 continue;
@@ -252,4 +256,23 @@ fn test_two_thread_stress_no_slot_leak() {
     cons.join().unwrap();
     assert_eq!(q.get_counts(), (SLOTS as u32, 0, 0, 0));
     assert!(q.acquire_buffer().is_none());
+}
+
+#[test]
+fn test_parcel_write_header_overflow_returns_zero() {
+    let mut buf = [0u8; 16];
+    // SAFETY: `buf` is a live 16-byte array.
+    let (ok, overflow) = unsafe {
+        (
+            ryu_surfaceflinger_queue::ffi::ryu_sf_parcel_write_header(buf.as_mut_ptr(), 16, 8, 4),
+            ryu_surfaceflinger_queue::ffi::ryu_sf_parcel_write_header(
+                buf.as_mut_ptr(),
+                16,
+                u32::MAX - 8,
+                4,
+            ),
+        )
+    };
+    assert_eq!(ok, 28);
+    assert_eq!(overflow, 0);
 }

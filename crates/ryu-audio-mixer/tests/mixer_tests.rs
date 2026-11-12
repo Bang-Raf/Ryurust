@@ -10,11 +10,7 @@ fn csharp_multiply_round_up(a: f32, b: f32) -> f32 {
 /// `width` floats (`Avx`/`Sse41`/`AdvSimd` paths), `MultiplyRoundUp` on the tail; width 0
 /// is `ProcessMixSlowPath`.
 fn csharp_process_mix(output: &mut [f32], input: &[f32], volume: f32, width: usize) {
-    let sisd_start = if width == 0 {
-        0
-    } else {
-        input.len() / width * width
-    };
+    let sisd_start = input.len().checked_div(width).unwrap_or(0) * width;
     for i in 0..sisd_start {
         output[i] += (input[i] * volume).ceil();
     }
@@ -45,7 +41,7 @@ fn test_version() {
 #[test]
 fn test_mix_buffer_basic() {
     let input = vec![
-        1.0f32, 2.0f32, -1.5f32, 0.25f32, 10.0f32, -5.2f32, 0.0f32, 3.14f32,
+        1.0f32, 2.0f32, -1.5f32, 0.25f32, 10.0f32, -5.2f32, 0.0f32, 3.15f32,
     ];
     let mut output = vec![0.0f32; 8];
     let volume = 0.5f32;
@@ -120,6 +116,7 @@ fn test_c_abi() {
     let mut output = [0.0f32; 4];
     let mut last = 0.0f32;
 
+    // SAFETY: `output` and `input` are distinct 4-float locals and `last` is a valid out-slot.
     unsafe {
         assert_eq!(
             ryu_audio_mix(output.as_mut_ptr(), input.as_ptr(), 4, 1.0),

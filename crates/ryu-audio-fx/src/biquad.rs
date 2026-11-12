@@ -221,6 +221,7 @@ pub fn process_multi_biquad_filter(
 
 /// Apply double biquad filter in cascade and mix the result into output buffer (Direct Form 1).
 /// 100% bit-identical to `BiquadFilterHelper.ProcessDoubleBiquadFilterAndMix`.
+#[allow(clippy::too_many_arguments)] // mirrors C# `BiquadFilterHelper` parameter list and backs the C ABI export
 #[inline]
 pub fn process_double_biquad_filter_and_mix(
     param0: &BiquadFilterParameter,
@@ -291,6 +292,7 @@ pub fn process_double_biquad_filter_and_mix(
 
 /// Apply double biquad filter in cascade and mix with volume ramp (Direct Form 1).
 /// 100% bit-identical to `BiquadFilterHelper.ProcessDoubleBiquadFilterAndMixRamp`.
+#[allow(clippy::too_many_arguments)] // mirrors C# `BiquadFilterHelper` parameter list and backs the C ABI export
 #[inline]
 pub fn process_double_biquad_filter_and_mix_ramp(
     param0: &BiquadFilterParameter,

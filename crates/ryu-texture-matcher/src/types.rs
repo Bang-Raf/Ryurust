@@ -78,6 +78,7 @@ impl PackedTextureKey {
     pub const BPP_MASK: u64 = 0x000F_C000_0000_0000;
     pub const FORMAT_CLASS_MASK: u64 = 0x03F0_0000_0000_0000;
 
+    #[allow(clippy::too_many_arguments)] // one parameter per packed key field, matching the `ryu_texture_pack_key` C ABI
     #[inline(always)]
     pub fn new(
         format: u16,

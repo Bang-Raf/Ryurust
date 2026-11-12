@@ -23,6 +23,8 @@ fn step1_test_adpcm_geometry_and_nibbles() {
 
 #[test]
 fn step1_test_ffi_null_safety() {
+    // SAFETY: pointers are either null (rejected before use) or point at locals at least as
+    // long as the lengths passed.
     unsafe {
         let mut out = [0.0f32; 16];
         let input = [0i16; 16];

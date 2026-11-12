@@ -2,6 +2,8 @@
 //!
 //! Values are normalized from Nintendo 16-bit signed integer LUT by dividing by 32768.0f.
 
+#![allow(clippy::excessive_precision)] // i16/32768 quotients copied verbatim from the reference tables
+
 pub static NORMAL_LUT_0: [f32; 512] = [
     0.20141602f32,
     0.59283447f32,

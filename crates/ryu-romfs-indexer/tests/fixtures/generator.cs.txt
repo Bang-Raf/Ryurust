@@ -1,0 +1,145 @@
+// Generates a synthetic RomFS image with LibHac's RomFsBuilder plus a manifest
+// read back through LibHac's RomFsFileSystem. All content is generated here.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using LibHac.Common;
+using LibHac.Fs;
+using LibHac.Fs.Fsa;
+using LibHac.Tools.Fs;
+using LibHac.Tools.FsSystem;
+using LibHac.Tools.FsSystem.RomFs;
+
+static class Program
+{
+    static ulong Fnv1a64(ReadOnlySpan<byte> data)
+    {
+        ulong h = 0xcbf29ce484222325UL;
+        foreach (byte b in data) { h ^= b; h *= 0x100000001b3UL; }
+        return h;
+    }
+
+    // Deterministic content: xorshift64* seeded from the path.
+    static byte[] Content(string path, int size)
+    {
+        ulong s = Fnv1a64(Encoding.UTF8.GetBytes(path)) | 1;
+        var buf = new byte[size];
+        for (int i = 0; i < size; i++)
+        {
+            s ^= s >> 12; s ^= s << 25; s ^= s >> 27;
+            buf[i] = (byte)((s * 0x2545F4914F6CDD1DUL) >> 56);
+        }
+        return buf;
+    }
+
+    static int Main(string[] args)
+    {
+        string outDir = args[0];
+        var files = new List<(string Path, int Size)>();
+        void F(string p, int size) => files.Add((p, size));
+
+        // Root-level files, including empty ones.
+        F("/root.bin", 100);
+        F("/empty.bin", 0);
+        F("/a", 1);
+        F("/b", 17);
+
+        // Names differing only by case (files and directories).
+        F("/case/Readme.txt", 33);
+        F("/case/README.TXT", 34);
+        F("/case/readme.txt", 35);
+        F("/case/Dir/x.bin", 5);
+        F("/case/dir/x.bin", 6);
+        F("/case/DIR/X.BIN", 7);
+
+        // Deep nesting; a file and a directory level share the name "data".
+        F("/deep/l1/l2/l3/l4/l5/l6/l7/l8/leaf.dat", 64);
+        F("/deep/l1/l2/l3/l4/mid.dat", 48);
+        F("/deep/l1/top.dat", 0);
+        F("/deep/data/data/data/data", 9);
+        F("/deep/data/data.bin", 10);
+
+        // Many files in one directory so hash buckets collide.
+        for (int i = 0; i < 220; i++) F($"/many/file_{i:D4}.bin", (i * 7) % 97);
+        // Many small sibling directories, each with a file of the same name.
+        for (int i = 0; i < 40; i++) F($"/dirs/d{i:D2}/item.bin", i);
+        for (int i = 0; i < 12; i++) F($"/dirs/d{i:D2}/sub/item.bin", 40 + i);
+
+        // Long names (LibHac/RomFS has no 255 limit on the table itself; keep it sane).
+        string long200 = new string('L', 180) + "_" + string.Concat(Enumerable.Range(0, 19).Select(i => (char)('a' + i)));
+        F($"/long/{long200}.bin", 21);
+        F($"/long/{long200}/inner_{new string('x', 120)}.bin", 22);
+        F($"/long/{long200}x.bin", 23);
+
+        // Non-ASCII UTF-8 names (2-, 3- and 4-byte sequences).
+        F("/utf8/café.txt", 11);
+        F("/utf8/日本語/ファイル.bin", 12);
+        F("/utf8/русский.dat", 13);
+        F("/utf8/emoji_\U0001F600.bin", 14);
+        F("/utf8/Über/straße.txt", 15);
+        F("/utf8/name with spaces.txt", 16);
+
+        // Name lengths 1..8 exercise the 4-byte name padding.
+        for (int n = 1; n <= 8; n++) F("/pad/" + new string('p', n), n);
+        // Sizes around the 16-byte data alignment.
+        foreach (int sz in new[] { 15, 16, 17, 31, 32, 33, 255, 256, 257, 1000 }) F($"/sizes/s{sz}.bin", sz);
+
+        string[] emptyDirs = { "/emptydir", "/deep/l1/emptyleaf", "/utf8/空" };
+
+        var builder = new RomFsBuilder();
+        foreach (var (path, size) in files)
+            builder.AddFile(path, new MemoryStorage(Content(path, size)).AsFile(OpenMode.Read));
+
+        // RomFsBuilder only exposes AddFile; empty directories go through the builder's own
+        // HierarchicalRomFileTable (LibHac's public AddDirectory) reached via reflection.
+        var tableField = typeof(RomFsBuilder).GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(f => f.FieldType == typeof(HierarchicalRomFileTable<RomFileInfo>));
+        var table = (HierarchicalRomFileTable<RomFileInfo>)tableField.GetValue(builder);
+        foreach (string d in emptyDirs) table.AddDirectory(d);
+
+        IStorage image = builder.Build();
+        image.GetSize(out long imageSize).ThrowIfFailure();
+        var bytes = new byte[imageSize];
+        image.Read(0, bytes).ThrowIfFailure();
+        File.WriteAllBytes(System.IO.Path.Combine(outDir, "libhac_synthetic.romfs"), bytes);
+
+        // Read back through LibHac.
+        var header = new RomfsHeader(new MemoryStorage(bytes).AsFile(OpenMode.Read));
+        var fs = new RomFsFileSystem(new MemoryStorage(bytes));
+        var lines = new List<string>();
+        int nDirs = 0, nFiles = 0;
+        foreach (DirectoryEntryEx e in fs.EnumerateEntries("/", "*", SearchOptions.RecurseSubdirectories).OrderBy(e => e.FullPath, StringComparer.Ordinal))
+        {
+            if (e.Type == DirectoryEntryType.Directory)
+            {
+                lines.Add($"D\t{e.FullPath}");
+                nDirs++;
+            }
+            else
+            {
+                if (!fs.FileTable.TryOpenFile(e.FullPath, out RomFileInfo info))
+                    throw new Exception("lookup failed: " + e.FullPath);
+                using var file = new UniqueRef<IFile>();
+                fs.OpenFile(ref file.Ref, e.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                file.Get.GetSize(out long sz).ThrowIfFailure();
+                if (sz != info.Length) throw new Exception("size mismatch");
+                var data = new byte[sz];
+                file.Get.Read(out long read, 0, data).ThrowIfFailure();
+                if (read != sz) throw new Exception("short read");
+                long abs = header.DataOffset + info.Offset;
+                if (!data.AsSpan().SequenceEqual(bytes.AsSpan((int)abs, (int)sz))) throw new Exception("offset mismatch");
+                lines.Add($"F\t{e.FullPath}\t{abs}\t{sz}\t{Fnv1a64(data):x16}");
+                nFiles++;
+            }
+        }
+        if (nFiles != files.Count) throw new Exception($"file count {nFiles} != {files.Count}");
+        File.WriteAllText(System.IO.Path.Combine(outDir, "libhac_synthetic.manifest.tsv"),
+            string.Join("\n", lines) + "\n", new UTF8Encoding(false));
+        Console.WriteLine($"image {imageSize} bytes, dirs {nDirs} (+root), files {nFiles}");
+        Console.WriteLine($"header: size {header.HeaderSize} dirHash {header.DirHashTableOffset}+{header.DirHashTableSize} dirMeta {header.DirMetaTableOffset}+{header.DirMetaTableSize} fileHash {header.FileHashTableOffset}+{header.FileHashTableSize} fileMeta {header.FileMetaTableOffset}+{header.FileMetaTableSize} data {header.DataOffset}");
+        return 0;
+    }
+}

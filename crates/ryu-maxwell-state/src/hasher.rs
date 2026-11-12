@@ -1,5 +1,5 @@
-/// Fast SIMD/WyHash-inspired 64-bit pipeline state key hasher.
-/// Designed to replace multi-loop scalar `* 23` hashing in `PipelineUid.GetHashCode()`.
+//! Fast SIMD/WyHash-inspired 64-bit pipeline state key hasher.
+//! Designed to replace multi-loop scalar `* 23` hashing in `PipelineUid.GetHashCode()`.
 
 const SECRET1: u64 = 0xa076_1d64_78bd_642f;
 const SECRET2: u64 = 0xe703_7ed1_a0b4_28db;
@@ -104,6 +104,7 @@ pub fn pipeline_state_equals(a: &[u8], b: &[u8]) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && a.len() >= 32 {
+            // SAFETY: AVX2 was just detected and the slices have equal length.
             return unsafe { pipeline_state_equals_avx2(a, b) };
         }
     }

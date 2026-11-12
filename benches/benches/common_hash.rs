@@ -40,7 +40,12 @@ fn bench(c: &mut Criterion) {
     }
 
     let backing = pseudo_random_bytes(PAGE * BATCH_PAGES, 0xBA7C);
-    let pages: Vec<&[u8]> = backing.chunks_exact(PAGE).collect();
+    let pages: Vec<&[u8]> = backing
+        .as_chunks::<PAGE>()
+        .0
+        .iter()
+        .map(|c| c.as_slice())
+        .collect();
     let mut results = vec![(0u64, 0u64); BATCH_PAGES];
     compute_hashes_batch_parallel(&pages, &mut results);
     assert_eq!(results[17], compute_hash_128(pages[17]));

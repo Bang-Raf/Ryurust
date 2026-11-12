@@ -8,8 +8,11 @@ use ryu_texture_bcn::*;
 
 #[test]
 fn test_step1_null_and_zero_bounds() {
+    // SAFETY: pointers are null (rejected) or point at the distinct 64-byte locals `src`/`buf`,
+    // and no length passed exceeds 64.
     unsafe {
         let mut buf = [0u8; 64];
+        let src = [0u8; 64];
         // Null source
         assert_eq!(
             ryu_texture_decode_bc1(std::ptr::null(), 8, buf.as_mut_ptr(), 64, 4, 4),
@@ -17,22 +20,22 @@ fn test_step1_null_and_zero_bounds() {
         );
         // Null dest
         assert_eq!(
-            ryu_texture_decode_bc1(buf.as_ptr(), 8, std::ptr::null_mut(), 64, 4, 4),
+            ryu_texture_decode_bc1(src.as_ptr(), 8, std::ptr::null_mut(), 64, 4, 4),
             RYU_BCN_ERR_NULL_PTR
         );
         // Zero dimensions (safe no-op)
         assert_eq!(
-            ryu_texture_decode_bc1(buf.as_ptr(), 8, buf.as_mut_ptr(), 64, 0, 0),
+            ryu_texture_decode_bc1(src.as_ptr(), 8, buf.as_mut_ptr(), 64, 0, 0),
             RYU_BCN_SUCCESS
         );
         // Source buffer too small
         assert_eq!(
-            ryu_texture_decode_bc1(buf.as_ptr(), 4, buf.as_mut_ptr(), 64, 4, 4),
+            ryu_texture_decode_bc1(src.as_ptr(), 4, buf.as_mut_ptr(), 64, 4, 4),
             RYU_BCN_ERR_BUFFER_TOO_SMALL
         );
         // Destination buffer too small
         assert_eq!(
-            ryu_texture_decode_bc1(buf.as_ptr(), 8, buf.as_mut_ptr(), 16, 4, 4),
+            ryu_texture_decode_bc1(src.as_ptr(), 8, buf.as_mut_ptr(), 16, 4, 4),
             RYU_BCN_ERR_BUFFER_TOO_SMALL
         );
     }
@@ -41,9 +44,9 @@ fn test_step1_null_and_zero_bounds() {
 #[test]
 fn test_step1_odd_and_clipped_dimensions() {
     // 1x1, 3x3, 5x5, 7x7 textures where block dimensions are clipped
-    for &(w, h) in &[(1, 1), (2, 2), (3, 3), (5, 5), (7, 7), (13, 17)] {
-        let blocks_x = (w + 3) / 4;
-        let blocks_y = (h + 3) / 4;
+    for &(w, h) in &[(1usize, 1usize), (2, 2), (3, 3), (5, 5), (7, 7), (13, 17)] {
+        let blocks_x = w.div_ceil(4);
+        let blocks_y = h.div_ceil(4);
 
         // BC1: 8 bytes per block, 4 bytes per pixel output
         let src_bc1 = vec![0u8; blocks_x * blocks_y * 8];
@@ -164,6 +167,7 @@ fn test_step2_bc3_interpolated_alpha() {
     // bit 16..18: 0 (index 0)
     // bit 19..21: 1 (index 1) -> 1 << 3 = 8
     // bit 22..24: 2 (index 2) -> 2 << 6 = 128
+    #[allow(clippy::identity_op)] // `0 |` spells out pixel 0's index next to pixels 1 and 2
     let indices_low: u32 = 0 | (1 << 3) | (2 << 6);
     block[2] = indices_low as u8;
     block[3] = (indices_low >> 8) as u8;
@@ -191,6 +195,7 @@ fn test_step2_bc4_bc5_rgtc() {
     block4[0] = 200;
     block4[1] = 50;
     // index 0 -> 200, index 1 -> 50, index 2 -> (6*200 + 50)/7 = 178
+    #[allow(clippy::identity_op)] // `0 |` spells out pixel 0's index next to pixels 1 and 2
     let indices: u32 = 0 | (1 << 3) | (2 << 6);
     block4[2] = indices as u8;
     block4[3] = (indices >> 8) as u8;

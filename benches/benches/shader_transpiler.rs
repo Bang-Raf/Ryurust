@@ -66,8 +66,10 @@ fn bench(c: &mut Criterion) {
 
     let code = generate_shader(64 * 1024);
     let words: Vec<u64> = code
-        .chunks_exact(8)
-        .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| u64::from_le_bytes(*c))
         .collect();
     assert_eq!(
         decode_instruction(words[words.len() - 1], 0).opcode,

@@ -26,7 +26,10 @@ pub struct Radix48PageTable {
     last_l3: *mut L3Node,
 }
 
+// SAFETY: the table exclusively owns every node reachable from `l0` (allocated with
+// `Box` and freed only by `unmap`/`Drop`), so moving it to another thread is sound.
 unsafe impl Send for Radix48PageTable {}
+// SAFETY: `&self` methods only read nodes; all mutation requires `&mut self`.
 unsafe impl Sync for Radix48PageTable {}
 
 impl Default for Radix48PageTable {
@@ -50,6 +53,8 @@ impl Radix48PageTable {
         let base_va = va >> (PAGE_BITS + LEVEL_BITS);
 
         if base_va == self.last_l3_base_va && !self.last_l3.is_null() {
+            // SAFETY: `last_l3` is non-null and points at a live L3 node: `unmap` clears
+            // the cache before freeing the node it refers to.
             unsafe {
                 return (*self.last_l3).entries[l3_idx];
             }
@@ -59,6 +64,8 @@ impl Radix48PageTable {
         let l1_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 2)) & LEVEL_MASK) as usize;
         let l0_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 3)) & LEVEL_MASK) as usize;
 
+        // SAFETY: every non-null entry points at a live node owned by this table; each
+        // level is null-checked before it is dereferenced.
         unsafe {
             let l1 = self.l0[l0_idx];
             if l1.is_null() {
@@ -82,6 +89,7 @@ impl Radix48PageTable {
         let base_va = va >> (PAGE_BITS + LEVEL_BITS);
 
         if base_va == self.last_l3_base_va && !self.last_l3.is_null() {
+            // SAFETY: as in `read`, a non-null `last_l3` always refers to a live node.
             unsafe {
                 return (*self.last_l3).entries[l3_idx];
             }
@@ -91,6 +99,8 @@ impl Radix48PageTable {
         let l1_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 2)) & LEVEL_MASK) as usize;
         let l0_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 3)) & LEVEL_MASK) as usize;
 
+        // SAFETY: every non-null entry points at a live node owned by this table; each
+        // level is null-checked before it is dereferenced.
         unsafe {
             let l1 = self.l0[l0_idx];
             if l1.is_null() {
@@ -116,6 +126,8 @@ impl Radix48PageTable {
         let l1_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 2)) & LEVEL_MASK) as usize;
         let l0_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 3)) & LEVEL_MASK) as usize;
 
+        // SAFETY: missing levels are allocated before use, so each pointer dereferenced
+        // below is a live node owned by this table, and `&mut self` gives exclusive access.
         unsafe {
             if self.l0[l0_idx].is_null() {
                 self.l0[l0_idx] = Box::into_raw(Box::new(L1Node {
@@ -145,12 +157,17 @@ impl Radix48PageTable {
         }
     }
 
+    /// Pages covered by `size` bytes, rounded up. Doesn't overflow for `size` near
+    /// `u64::MAX`; addresses past the end wrap, as they always did in release builds.
+    #[inline]
+    fn page_count(size: u64) -> u64 {
+        size / (PAGE_SIZE as u64) + u64::from(size & PAGE_MASK != 0)
+    }
+
     pub fn map_range(&mut self, va: u64, size: u64, host_ptr_base: u64) {
-        let page_count = (size + PAGE_MASK) / (PAGE_SIZE as u64);
-        for i in 0..page_count {
-            let page_va = va + i * (PAGE_SIZE as u64);
-            let page_host = host_ptr_base + i * (PAGE_SIZE as u64);
-            self.map(page_va, page_host);
+        for i in 0..Self::page_count(size) {
+            let offset = i.wrapping_mul(PAGE_SIZE as u64);
+            self.map(va.wrapping_add(offset), host_ptr_base.wrapping_add(offset));
         }
     }
 
@@ -160,6 +177,9 @@ impl Radix48PageTable {
         let l1_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 2)) & LEVEL_MASK) as usize;
         let l0_idx = ((va >> (PAGE_BITS + LEVEL_BITS * 3)) & LEVEL_MASK) as usize;
 
+        // SAFETY: each level is null-checked before use and `&mut self` gives exclusive
+        // access. A node is freed with `Box::from_raw` exactly once, after which its parent
+        // slot (and the `last_l3` cache, reset above) no longer refers to it.
         unsafe {
             let l1 = self.l0[l0_idx];
             if l1.is_null() {
@@ -203,10 +223,8 @@ impl Radix48PageTable {
     }
 
     pub fn unmap_range(&mut self, va: u64, size: u64) {
-        let page_count = (size + PAGE_MASK) / (PAGE_SIZE as u64);
-        for i in 0..page_count {
-            let page_va = va + i * (PAGE_SIZE as u64);
-            self.unmap(page_va);
+        for i in 0..Self::page_count(size) {
+            self.unmap(va.wrapping_add(i.wrapping_mul(PAGE_SIZE as u64)));
         }
     }
 }
@@ -216,6 +234,8 @@ impl Drop for Radix48PageTable {
         for l0_idx in 0..LEVEL_SIZE {
             let l1 = self.l0[l0_idx];
             if !l1.is_null() {
+                // SAFETY: all non-null entries are live `Box` allocations owned solely by
+                // this table; each is freed exactly once, children before their parent.
                 unsafe {
                     for l1_idx in 0..LEVEL_SIZE {
                         let l2 = (*l1).entries[l1_idx];

@@ -29,9 +29,12 @@ fn masks() -> RegisterMasksNative {
 }
 
 /// Mostly short-lived SSA temporaries, some medium, a few long-lived values; ~30% vector;
-/// ~3% fixed to RAX/RCX/RDX (call/shift/div constraints).
+/// ~3% fixed to RAX/RCX/RDX (call/shift/div constraints). A fixed interval that would
+/// overlap an earlier fixed interval on the same register is made non-fixed: two such
+/// intervals are unsatisfiable and `run_pass` rejects the whole input.
 fn intervals(n: usize, seed: u32, shuffled: bool) -> Vec<Interval> {
     let mut next = rng(seed);
+    let mut fixed_until = [i32::MIN; 3];
     let mut v: Vec<Interval> = (0..n)
         .map(|i| {
             let start = (i * 2) as i32;
@@ -44,14 +47,22 @@ fn intervals(n: usize, seed: u32, shuffled: bool) -> Vec<Interval> {
                 128 + next() % 896
             } as i32;
             let is_vec = next() % 10 < 3;
-            let is_fixed = !is_vec && next() % 100 < 3;
+            let mut is_fixed = !is_vec && next() % 100 < 3;
+            let fixed_reg = if is_fixed { (next() % 3) as usize } else { 0 };
+            if is_fixed {
+                if fixed_until[fixed_reg] > start {
+                    is_fixed = false;
+                } else {
+                    fixed_until[fixed_reg] = start + len;
+                }
+            }
             Interval {
                 id: i as u32,
                 start,
                 end: start + len,
                 reg_type: is_vec as u8,
                 is_fixed,
-                fixed_reg: if is_fixed { (next() % 3) as i16 } else { -1 },
+                fixed_reg: if is_fixed { fixed_reg as i16 } else { -1 },
                 first_use: start,
                 ..Default::default()
             }
@@ -78,6 +89,7 @@ fn run(engine: &mut LinearScanEngine, ivs: &[Interval]) -> usize {
 fn check(ivs: &[Interval]) {
     let mut e = LinearScanEngine::new();
     let allocated = run(&mut e, ivs);
+    assert_eq!(e.fixed_conflict(), None, "input must be satisfiable");
     let spilled = e
         .intervals
         .iter()

@@ -6,6 +6,7 @@ use std::ptr;
 
 #[test]
 fn test_step1_null_safety() {
+    // SAFETY: non-null arguments point to live locals; null ones are rejected before use.
     unsafe {
         let mut count = 0usize;
         let mut state = GpfifoState::default();
@@ -40,6 +41,7 @@ fn test_step1_null_safety() {
 
 #[test]
 fn test_step1_zero_length_safety() {
+    // SAFETY: all pointers refer to live locals and the lengths match them.
     unsafe {
         let mut count = 99usize;
         let mut state = GpfifoState::default();
@@ -125,7 +127,7 @@ fn test_step2_inc_method_bit_identical() {
 fn test_step2_non_inc_method_bit_identical() {
     let mut state = GpfifoState::default();
     // NonIncMethod (sec_op = 3): method 0x890, subchannel 0, count 3
-    let header = 0x890 | (0 << 13) | (3 << 16) | (3 << 29);
+    let header = 0x890 | (3 << 16) | (3 << 29);
     let cmds = [header, 111, 222, 333];
     let mut out = [GpfifoParsedMethod {
         method_address: 0,
@@ -215,7 +217,7 @@ fn test_step2_one_inc_method_bit_identical() {
 fn test_step2_immd_data_method_bit_identical() {
     let mut state = GpfifoState::default();
     // ImmdDataMethod (sec_op = 4): method 0x585, subchannel 0, immd_data = 0x123
-    let header = 0x585 | (0 << 13) | (0x123 << 16) | (4 << 29);
+    let header = 0x585 | (0x123 << 16) | (4 << 29);
     let cmds = [header];
     let mut out = [GpfifoParsedMethod {
         method_address: 0,
@@ -246,9 +248,9 @@ fn test_step2_interleaved_pushbuffer_stream() {
     // 1. IncMethod (0x100, count 2)
     // 2. ImmdDataMethod (0x585, val 0x42)
     // 3. NonIncMethod (0x700, count 2)
-    let h1 = 0x100 | (0 << 13) | (2 << 16) | (1 << 29);
-    let h2 = 0x585 | (0 << 13) | (0x42 << 16) | (4 << 29);
-    let h3 = 0x700 | (0 << 13) | (2 << 16) | (3 << 29);
+    let h1 = 0x100 | (2 << 16) | (1 << 29);
+    let h2 = 0x585 | (0x42 << 16) | (4 << 29);
+    let h3 = 0x700 | (2 << 16) | (3 << 29);
 
     let stream = [h1, 10, 20, h2, h3, 100, 200];
 

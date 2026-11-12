@@ -27,7 +27,7 @@ pub fn get_adpcm_data_size(sample_count: usize) -> usize {
 
 #[inline(always)]
 pub fn get_nibbles_from_sample_count(sample_count: usize) -> usize {
-    let header_size = if (sample_count % SAMPLES_PER_FRAME) != 0 {
+    let header_size = if !sample_count.is_multiple_of(SAMPLES_PER_FRAME) {
         2
     } else {
         0
@@ -52,6 +52,7 @@ fn get_coefficient(coefficients: &[i16], index: usize) -> i16 {
 }
 
 /// Decodes Nintendo DSP ADPCM compressed audio stream into linear 16-bit PCM samples.
+#[allow(clippy::too_many_arguments)] // mirrors C# `AdpcmHelper.Decode` and backs `ryu_adpcm_decode`
 pub fn decode_adpcm(
     output: &mut [i16],
     input: &[u8],
@@ -66,7 +67,7 @@ pub fn decode_adpcm(
         return 0;
     }
 
-    let mut pred_scale = (loop_context.pred_scale as u8) & 0xFF;
+    let mut pred_scale = loop_context.pred_scale as u8;
     let mut scale = pred_scale & 0x0F;
     let mut coefficient_index = (pred_scale >> 4) & 0x0F;
     let mut history0 = loop_context.history0;
@@ -89,7 +90,7 @@ pub fn decode_adpcm(
     let mut input_idx = 0;
 
     while remaining > 0 && input_idx < target_input.len() {
-        let samples_count = if (nibbles % NIBBLES_PER_FRAME) == 0 {
+        let samples_count = if nibbles.is_multiple_of(NIBBLES_PER_FRAME) {
             pred_scale = target_input[input_idx];
             input_idx += 1;
 

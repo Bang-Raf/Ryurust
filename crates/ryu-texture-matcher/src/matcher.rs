@@ -136,9 +136,7 @@ pub fn view_target_compatible(
         }
         1 | 4 => {
             // Texture2D, Texture2DArray
-            if rhs == 1 || rhs == 4 {
-                TextureViewCompatibility::Full
-            } else if supports_cubemap_view && (rhs == 7 || rhs == 8) {
+            if rhs == 1 || rhs == 4 || (supports_cubemap_view && (rhs == 7 || rhs == 8)) {
                 TextureViewCompatibility::Full
             } else {
                 TextureViewCompatibility::Incompatible

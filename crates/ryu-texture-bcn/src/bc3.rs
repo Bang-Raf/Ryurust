@@ -10,17 +10,17 @@ pub fn bcn_lerp_alpha_unorm(a0: u8, a1: u8, pal: &mut [u8; 8]) {
     let a0_32 = a0 as u32;
     let a1_32 = a1 as u32;
     if a0 > a1 {
-        pal[2] = ((6 * a0_32 + 1 * a1_32) / 7) as u8;
+        pal[2] = ((6 * a0_32 + a1_32) / 7) as u8;
         pal[3] = ((5 * a0_32 + 2 * a1_32) / 7) as u8;
         pal[4] = ((4 * a0_32 + 3 * a1_32) / 7) as u8;
         pal[5] = ((3 * a0_32 + 4 * a1_32) / 7) as u8;
         pal[6] = ((2 * a0_32 + 5 * a1_32) / 7) as u8;
-        pal[7] = ((1 * a0_32 + 6 * a1_32) / 7) as u8;
+        pal[7] = ((a0_32 + 6 * a1_32) / 7) as u8;
     } else {
-        pal[2] = ((4 * a0_32 + 1 * a1_32) / 5) as u8;
+        pal[2] = ((4 * a0_32 + a1_32) / 5) as u8;
         pal[3] = ((3 * a0_32 + 2 * a1_32) / 5) as u8;
         pal[4] = ((2 * a0_32 + 3 * a1_32) / 5) as u8;
-        pal[5] = ((1 * a0_32 + 4 * a1_32) / 5) as u8;
+        pal[5] = ((a0_32 + 4 * a1_32) / 5) as u8;
         pal[6] = 0;
         pal[7] = 0xff;
     }
@@ -41,8 +41,8 @@ pub fn decode_bc3_block(input: &[u8; 16], output: &mut [u32; 16]) {
 
     let mut rgb_indices = u32::from_le_bytes(rgb_input[4..8].try_into().unwrap());
     let mut rgb_tile = [0u32; 16];
-    for i in 0..16 {
-        rgb_tile[i] = clut[(rgb_indices & 3) as usize];
+    for texel in rgb_tile.iter_mut() {
+        *texel = clut[(rgb_indices & 3) as usize];
         rgb_indices >>= 2;
     }
 
@@ -69,8 +69,8 @@ pub fn decode_bc3_surface(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 16;
     let expected_dst = width * height * 4;
     if src.len() < expected_src {

@@ -110,9 +110,11 @@ fn bench(c: &mut Criterion) {
     });
 
     // CMIF response: one move handle, SFCO header + result + 8 bytes of output.
-    let mut resp = ParsedIpcMessage::default();
-    resp.msg_type = 4;
-    resp.handle_desc_enabled = 1;
+    let mut resp = ParsedIpcMessage {
+        msg_type: 4,
+        handle_desc_enabled: 1,
+        ..Default::default()
+    };
     resp.handle_desc.move_count = 1;
     resp.handle_desc.move_handles[0] = 0x0000_beef;
     let mut resp_raw = Vec::with_capacity(24);
@@ -144,8 +146,10 @@ fn bench(c: &mut Criterion) {
         },
     );
 
-    let mut tresp = ParsedIpcMessage::default();
-    tresp.msg_type = 0x13;
+    let tresp = ParsedIpcMessage {
+        msg_type: 0x13,
+        ..Default::default()
+    };
     let tipc_len = serialize_tipc(&tresp, &resp_raw[8..], &mut out).expect("serialize_tipc");
     group.throughput(Throughput::Bytes(tipc_len as u64));
     group.bench_function(

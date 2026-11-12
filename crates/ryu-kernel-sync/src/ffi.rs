@@ -3,11 +3,23 @@
 use crate::arbiter::ArbiterRegistry;
 use std::slice;
 
+pub const RYU_KERNEL_SYNC_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_kernel_sync_version() -> u32 {
+    RYU_KERNEL_SYNC_VERSION
+}
+
+/// # Safety
+/// Always sound to call; release the returned handle with `ryu_arbiter_destroy`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_create() -> *mut ArbiterRegistry {
     Box::into_raw(Box::new(ArbiterRegistry::new()))
 }
 
+/// # Safety
+/// `registry` must be null or a handle from `ryu_arbiter_create` that has not been
+/// destroyed yet; it must not be used (by any thread) after this call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_destroy(registry: *mut ArbiterRegistry) {
     if !registry.is_null() {
@@ -15,6 +27,8 @@ pub unsafe extern "C" fn ryu_arbiter_destroy(registry: *mut ArbiterRegistry) {
     }
 }
 
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_insert_waiter(
     registry: *mut ArbiterRegistry,
@@ -30,6 +44,8 @@ pub unsafe extern "C" fn ryu_arbiter_insert_waiter(
     0
 }
 
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_remove_waiter(
     registry: *mut ArbiterRegistry,
@@ -47,6 +63,11 @@ pub unsafe extern "C" fn ryu_arbiter_remove_waiter(
     }
 }
 
+/// Returns 0 without waking anyone when `out_woken` is null or `max_woken` is 0.
+///
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`. `out_woken` must be
+/// null or valid for writes of `max_woken` `u64`s.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_wake_waiters(
     registry: *mut ArbiterRegistry,
@@ -66,6 +87,8 @@ pub unsafe extern "C" fn ryu_arbiter_wake_waiters(
     reg.wake_waiters(address, count, out_slice) as i32
 }
 
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_get_waiter_count(
     registry: *const ArbiterRegistry,
@@ -78,6 +101,10 @@ pub unsafe extern "C" fn ryu_arbiter_get_waiter_count(
     reg.get_waiter_count(address) as i32
 }
 
+/// Returns 0 when `registry` is null (this function has no error channel).
+///
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_compute_modify_addend(
     registry: *const ArbiterRegistry,
@@ -91,6 +118,8 @@ pub unsafe extern "C" fn ryu_arbiter_compute_modify_addend(
     reg.compute_signal_modify_addend(address, count)
 }
 
+/// # Safety
+/// `registry` must be null or a live handle from `ryu_arbiter_create`.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_arbiter_clear(registry: *mut ArbiterRegistry) -> i32 {
     if registry.is_null() {
@@ -99,4 +128,41 @@ pub unsafe extern "C" fn ryu_arbiter_clear(registry: *mut ArbiterRegistry) -> i3
     let reg = &*registry;
     reg.clear();
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn version_matches_constant() {
+        assert_eq!(ryu_kernel_sync_version(), RYU_KERNEL_SYNC_VERSION);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        unsafe {
+            let mut woken = [0u64; 4];
+            ryu_arbiter_destroy(ptr::null_mut());
+            assert_eq!(ryu_arbiter_insert_waiter(ptr::null_mut(), 0x1000, 1, 0), -1);
+            assert_eq!(ryu_arbiter_remove_waiter(ptr::null_mut(), 0x1000, 1), -1);
+            assert_eq!(
+                ryu_arbiter_wake_waiters(ptr::null_mut(), 0x1000, 1, woken.as_mut_ptr(), 4),
+                -1
+            );
+            assert_eq!(ryu_arbiter_get_waiter_count(ptr::null(), 0x1000), -1);
+            assert_eq!(ryu_arbiter_compute_modify_addend(ptr::null(), 0x1000, 1), 0);
+            assert_eq!(ryu_arbiter_clear(ptr::null_mut()), -1);
+
+            let reg = ryu_arbiter_create();
+            assert_eq!(ryu_arbiter_insert_waiter(reg, 0x1000, 1, 0), 0);
+            assert_eq!(
+                ryu_arbiter_wake_waiters(reg, 0x1000, 1, ptr::null_mut(), 4),
+                0
+            );
+            assert_eq!(ryu_arbiter_get_waiter_count(reg, 0x1000), 1);
+            ryu_arbiter_destroy(reg);
+        }
+    }
 }

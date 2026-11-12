@@ -113,28 +113,32 @@ fn test_avx2_bitset_or_and_not() {
 
 #[test]
 fn test_c_abi_lifecycle() {
-    assert_eq!(ryu_jit_regalloc_version(), 0x00010000);
-    let ctx = ryu_regalloc_create();
-    assert!(!ctx.is_null());
+    // SAFETY: `ctx` comes from `ryu_regalloc_create`, is live until the final destroy, and
+    // the outputs are valid locals.
+    unsafe {
+        assert_eq!(ryu_jit_regalloc_version(), 0x00010000);
+        let ctx = ryu_regalloc_create();
+        assert!(!ctx.is_null());
 
-    ryu_regalloc_add_interval(ctx, 100, 1, 10, 0, 0, -1);
-    ryu_regalloc_add_interval(ctx, 101, 2, 12, 0, 0, -1);
+        ryu_regalloc_add_interval(ctx, 100, 1, 10, 0, 0, -1);
+        ryu_regalloc_add_interval(ctx, 101, 2, 12, 0, 0, -1);
 
-    let allocated = ryu_regalloc_run_pass(ctx, 0xFF, 0xFF, 16);
-    assert_eq!(allocated, 2);
+        let allocated = ryu_regalloc_run_pass(ctx, 0xFF, 0xFF, 16);
+        assert_eq!(allocated, 2);
 
-    let mut id = 0;
-    let mut reg = -1;
-    let mut spill = -1;
-    assert_eq!(
-        ryu_regalloc_get_result(ctx, 0, &mut id, &mut reg, &mut spill),
-        1
-    );
-    assert_eq!(id, 100);
-    assert!(reg >= 0);
+        let mut id = 0;
+        let mut reg = -1;
+        let mut spill = -1;
+        assert_eq!(
+            ryu_regalloc_get_result(ctx, 0, &mut id, &mut reg, &mut spill),
+            1
+        );
+        assert_eq!(id, 100);
+        assert!(reg >= 0);
 
-    ryu_regalloc_reset(ctx);
-    ryu_regalloc_destroy(ctx);
+        ryu_regalloc_reset(ctx);
+        ryu_regalloc_destroy(ctx);
+    }
 }
 
 #[test]
@@ -359,4 +363,367 @@ fn test_linear_scan_fixed_interval_does_not_share_with_live_holder() {
     assert_eq!(engine.intervals[0].spill_offset, 0);
     assert_eq!(engine.intervals[1].assigned_reg, 0);
     assert_eq!(allocated, 1);
+}
+
+fn iv(id: u32, start: i32, end: i32) -> Interval {
+    Interval {
+        id,
+        start,
+        end,
+        ..Default::default()
+    }
+}
+
+fn fixed(id: u32, start: i32, end: i32, reg: i16) -> Interval {
+    Interval {
+        is_fixed: true,
+        fixed_reg: reg,
+        ..iv(id, start, end)
+    }
+}
+
+fn by_id(engine: &LinearScanEngine, id: u32) -> Interval {
+    *engine.intervals.iter().find(|iv| iv.id == id).unwrap()
+}
+
+const TWO_INT_REGS: RegisterMasksNative = RegisterMasksNative {
+    int_available: 0b11,
+    vec_available: 0,
+    registers_count: 2,
+};
+
+#[test]
+fn test_overlapping_fixed_intervals_on_same_register_are_reported() {
+    let mut engine = LinearScanEngine::new();
+    engine.add_interval(iv(1, 0, 4));
+    engine.add_interval(fixed(10, 2, 20, 1));
+    engine.add_interval(iv(2, 5, 9));
+    engine.add_interval(fixed(11, 8, 12, 1));
+
+    let expected = FixedRegisterConflict {
+        first_id: 10,
+        second_id: 11,
+        reg_type: 0,
+        reg: 1,
+    };
+    assert_eq!(engine.try_run_pass(TWO_INT_REGS), Err(expected));
+    assert_eq!(engine.fixed_conflict(), Some(expected));
+    // Nothing is allocated, so no result can be mistaken for a valid one.
+    for iv in &engine.intervals {
+        assert_eq!((iv.assigned_reg, iv.spill_offset), (-1, -1));
+    }
+    assert_eq!(engine.next_spill_offset, 0);
+
+    // The infallible entry point reports the same thing through its sentinel.
+    assert_eq!(engine.run_pass(TWO_INT_REGS), RUN_PASS_FIXED_CONFLICT);
+    assert_eq!(engine.fixed_conflict(), Some(expected));
+
+    // The conflict does not stick to the engine.
+    engine.reset();
+    assert_eq!(engine.fixed_conflict(), None);
+    engine.add_interval(fixed(10, 2, 20, 1));
+    assert_eq!(engine.try_run_pass(TWO_INT_REGS), Ok(1));
+    assert_eq!(engine.fixed_conflict(), None);
+}
+
+#[test]
+fn test_fixed_conflict_found_behind_shorter_fixed_interval_and_in_unsorted_input() {
+    // 22 overlaps 20, not its chain neighbour 21. Added out of order on purpose.
+    let mut engine = LinearScanEngine::new();
+    engine.add_interval(fixed(22, 50, 60, 3));
+    engine.add_interval(fixed(21, 10, 12, 3));
+    engine.add_interval(fixed(20, 0, 100, 3));
+    let err = engine.try_run_pass(TWO_INT_REGS).unwrap_err();
+    assert_eq!((err.first_id, err.second_id, err.reg), (20, 21, 3));
+
+    engine.reset();
+    engine.add_interval(fixed(20, 0, 100, 3));
+    engine.add_interval(fixed(21, 100, 112, 3));
+    engine.add_interval(fixed(22, 50, 60, 3));
+    let err = engine.try_run_pass(TWO_INT_REGS).unwrap_err();
+    assert_eq!((err.first_id, err.second_id, err.reg), (20, 22, 3));
+    assert!(err.to_string().contains("integer register 3"));
+}
+
+#[test]
+fn test_fixed_intervals_that_do_not_conflict_are_accepted() {
+    let mut engine = LinearScanEngine::new();
+    // Back to back on one register (half-open ranges).
+    engine.add_interval(fixed(1, 0, 10, 0));
+    engine.add_interval(fixed(2, 10, 20, 0));
+    // Same time, different register.
+    engine.add_interval(fixed(3, 0, 10, 1));
+    // Same time and register number, different register class.
+    engine.add_interval(Interval {
+        reg_type: 1,
+        ..fixed(4, 0, 10, 0)
+    });
+    // An empty interval is live nowhere.
+    engine.add_interval(fixed(5, 15, 15, 0));
+
+    assert_eq!(engine.try_run_pass(TWO_INT_REGS), Ok(5));
+    assert_eq!(engine.fixed_conflict(), None);
+    for iv in &engine.intervals {
+        assert_eq!(iv.assigned_reg, iv.fixed_reg);
+    }
+}
+
+#[test]
+fn test_c_abi_reports_fixed_conflict() {
+    // SAFETY: `ctx` comes from `ryu_regalloc_create`, is live until the final destroy, and
+    // every output is a valid local or null.
+    unsafe {
+        let ctx = ryu_regalloc_create();
+        ryu_regalloc_add_interval(ctx, 7, 0, 10, 1, 1, 2);
+        ryu_regalloc_add_interval(ctx, 8, 5, 6, 1, 1, 2);
+        ryu_regalloc_add_interval(ctx, 9, 0, 3, 0, 0, -1);
+
+        let (mut first, mut second, mut reg_type, mut reg) = (0u32, 0u32, 0u8, 0i16);
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(ctx, &mut first, &mut second, &mut reg_type, &mut reg),
+            0,
+            "no pass has run yet"
+        );
+
+        let ret = ryu_regalloc_run_pass(ctx, 0xFF, 0xFF, 16);
+        assert_eq!(ret, usize::MAX);
+        assert_eq!(ret as i32, -1, "what the C# wrapper's (int) cast sees");
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(ctx, &mut first, &mut second, &mut reg_type, &mut reg),
+            1
+        );
+        assert_eq!((first, second, reg_type, reg), (7, 8, 1, 2));
+        // Null outputs are skipped.
+        let null = std::ptr::null_mut();
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(
+                ctx,
+                null,
+                null,
+                std::ptr::null_mut(),
+                null as *mut i16
+            ),
+            1
+        );
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(
+                std::ptr::null(),
+                null,
+                null,
+                std::ptr::null_mut(),
+                null as *mut i16
+            ),
+            0
+        );
+
+        for index in 0..3 {
+            let (mut id, mut r, mut spill) = (0u32, 0i16, 0i32);
+            assert_eq!(
+                ryu_regalloc_get_result(ctx, index, &mut id, &mut r, &mut spill),
+                1
+            );
+            assert_eq!((r, spill), (-1, -1));
+        }
+
+        ryu_regalloc_reset(ctx);
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(ctx, &mut first, &mut second, &mut reg_type, &mut reg),
+            0
+        );
+        ryu_regalloc_destroy(ctx);
+    }
+}
+
+#[test]
+fn test_spill_evicts_active_interval_that_ends_last() {
+    let mut engine = LinearScanEngine::new();
+    engine.add_interval(iv(0, 0, 100)); // reg 0, ends last
+    engine.add_interval(iv(1, 1, 50)); // reg 1
+    engine.add_interval(iv(2, 2, 10)); // nothing free: evicts interval 0
+    engine.add_interval(iv(3, 12, 20)); // reg 0 again, after interval 2
+
+    assert_eq!(engine.run_pass(TWO_INT_REGS), 3);
+    assert_eq!(by_id(&engine, 0).assigned_reg, -1);
+    assert_eq!(by_id(&engine, 0).spill_offset, 0);
+    assert_eq!(by_id(&engine, 1).assigned_reg, 1);
+    assert_eq!(by_id(&engine, 2).assigned_reg, 0);
+    assert_eq!(by_id(&engine, 3).assigned_reg, 0);
+    assert_eq!(engine.next_spill_offset, 8);
+    assert_eq!(conflicting_pairs(&engine.intervals), 0);
+}
+
+#[test]
+fn test_spill_keeps_active_intervals_when_current_ends_last_or_ties() {
+    for cur_end in [200, 100] {
+        let mut engine = LinearScanEngine::new();
+        engine.add_interval(iv(0, 0, 100));
+        engine.add_interval(iv(1, 1, 50));
+        engine.add_interval(iv(2, 2, cur_end));
+
+        assert_eq!(engine.run_pass(TWO_INT_REGS), 2);
+        assert_eq!(by_id(&engine, 0).assigned_reg, 0);
+        assert_eq!(by_id(&engine, 1).assigned_reg, 1);
+        assert_eq!(by_id(&engine, 2).assigned_reg, -1, "cur_end={cur_end}");
+        assert_eq!(by_id(&engine, 2).spill_offset, 0);
+    }
+}
+
+#[test]
+fn test_spill_never_evicts_fixed_interval() {
+    // The fixed interval ends last of all, but the victim must be the furthest-ending
+    // *non-fixed* interval.
+    let mut engine = LinearScanEngine::new();
+    engine.add_interval(fixed(0, 0, 1000, 0));
+    engine.add_interval(iv(1, 1, 50));
+    engine.add_interval(iv(2, 2, 10));
+
+    assert_eq!(engine.run_pass(TWO_INT_REGS), 2);
+    assert_eq!(by_id(&engine, 0).assigned_reg, 0);
+    assert_eq!(by_id(&engine, 1).assigned_reg, -1);
+    assert_eq!(by_id(&engine, 2).assigned_reg, 1);
+
+    // Only fixed intervals are active: the current interval is the only candidate.
+    engine.reset();
+    engine.add_interval(fixed(0, 0, 1000, 0));
+    engine.add_interval(fixed(1, 0, 1000, 1));
+    engine.add_interval(iv(2, 2, 10));
+    assert_eq!(engine.run_pass(TWO_INT_REGS), 2);
+    assert_eq!(by_id(&engine, 2).assigned_reg, -1);
+    assert_eq!(by_id(&engine, 0).assigned_reg, 0);
+    assert_eq!(by_id(&engine, 1).assigned_reg, 1);
+}
+
+#[test]
+fn test_spill_only_considers_the_same_register_class() {
+    let mut engine = LinearScanEngine::new();
+    engine.add_interval(Interval {
+        reg_type: 1,
+        ..iv(0, 0, 1000)
+    });
+    engine.add_interval(iv(1, 1, 50));
+    engine.add_interval(iv(2, 2, 10));
+    let allocated = engine.run_pass(RegisterMasksNative {
+        int_available: 0b1,
+        vec_available: 0b1,
+        registers_count: 1,
+    });
+    assert_eq!(allocated, 2);
+    assert_eq!(
+        by_id(&engine, 0).assigned_reg,
+        0,
+        "vector interval untouched"
+    );
+    assert_eq!(by_id(&engine, 1).assigned_reg, -1);
+    assert_eq!(by_id(&engine, 2).assigned_reg, 0);
+}
+
+#[test]
+fn test_unsorted_input_gives_same_result_as_stably_sorted_input() {
+    let masks = RegisterMasksNative {
+        int_available: 0xFFFF & !((1 << 4) | (1 << 5)),
+        vec_available: 0xFFFF,
+        registers_count: 16,
+    };
+    // A second engine is reused across all cases, so the scratch left by one pass must not
+    // leak into the next.
+    let mut unsorted_engine = LinearScanEngine::new();
+    for &n in &[1usize, 2, 3, 64, 512, 2048] {
+        for seed in 1..=8u32 {
+            let mut shuffled = random_intervals(n, seed.wrapping_mul(0x9E37_79B9) | 1, true);
+            // Give many intervals the same start so that tie order matters.
+            for iv in &mut shuffled {
+                let len = iv.end - iv.start;
+                iv.start &= !0x1F;
+                iv.end = iv.start + len;
+                iv.is_fixed = false;
+                iv.fixed_reg = -1;
+            }
+            let mut sorted = shuffled.clone();
+            sorted.sort_by_key(|iv| iv.start); // stable reference order
+
+            let mut sorted_engine = LinearScanEngine::new();
+            for &iv in &sorted {
+                sorted_engine.add_interval(iv);
+            }
+            unsorted_engine.reset();
+            for &iv in &shuffled {
+                unsorted_engine.add_interval(iv);
+            }
+
+            let a = sorted_engine.run_pass(masks);
+            let b = unsorted_engine.run_pass(masks);
+            assert_eq!(a, b, "n={n} seed={seed}");
+            assert_eq!(
+                sorted_engine.intervals, unsorted_engine.intervals,
+                "n={n} seed={seed}"
+            );
+            assert_eq!(
+                sorted_engine.next_spill_offset,
+                unsorted_engine.next_spill_offset
+            );
+            assert_eq!(conflicting_pairs(&unsorted_engine.intervals), 0);
+        }
+    }
+}
+
+#[test]
+fn test_version_export_returns_constant() {
+    assert_eq!(ryu_jit_regalloc_version(), RYU_JIT_REGALLOC_VERSION);
+    assert_eq!(RYU_JIT_REGALLOC_VERSION, 0x0001_0000);
+}
+
+#[test]
+fn test_c_abi_null_pointers() {
+    use std::ptr::{null, null_mut};
+    let mut words = [1u64, 2, 3, 4, 5];
+    let src = [0xF0u64; 5];
+    // SAFETY: every pointer is either null or a valid local of the stated length.
+    unsafe {
+        ryu_regalloc_destroy(null_mut());
+        ryu_regalloc_reset(null_mut());
+        assert_eq!(ryu_regalloc_add_interval(null_mut(), 1, 0, 5, 0, 0, -1), 0);
+        assert_eq!(ryu_regalloc_run_pass(null_mut(), 0xFF, 0xFF, 16), 0);
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(null(), null_mut(), null_mut(), null_mut(), null_mut()),
+            0
+        );
+        assert_eq!(
+            ryu_regalloc_get_result(null(), 0, null_mut(), null_mut(), null_mut()),
+            0
+        );
+        assert_eq!(ryu_regalloc_get_highest_index(null(), 0), 0);
+        assert_eq!(ryu_regalloc_get_highest_index(null(), 8), 0);
+        assert_eq!(ryu_regalloc_bitset_or(null_mut(), src.as_ptr(), 5), 0);
+        assert_eq!(ryu_regalloc_bitset_or(words.as_mut_ptr(), null(), 5), 0);
+        assert_eq!(ryu_regalloc_bitset_and_not(null_mut(), src.as_ptr(), 5), 0);
+        assert_eq!(
+            ryu_regalloc_bitset_and_not(words.as_mut_ptr(), null(), 5),
+            0
+        );
+        assert_eq!(words, [1, 2, 3, 4, 5]);
+
+        // Null outputs on a live context are optional, not errors.
+        let ctx = ryu_regalloc_create();
+        ryu_regalloc_add_interval(ctx, 1, 0, 5, 0, 0, -1);
+        ryu_regalloc_run_pass(ctx, 0xFF, 0xFF, 16);
+        assert_eq!(
+            ryu_regalloc_get_result(ctx, 0, null_mut(), null_mut(), null_mut()),
+            1
+        );
+        ryu_regalloc_destroy(ctx);
+    }
+}
+
+#[test]
+fn test_c_abi_bitset_same_buffer() {
+    let mut words = [1u64, 0, 3, 4, 5];
+    // SAFETY: `dst` and `src` are the same valid 5-word buffer, which the API allows.
+    unsafe {
+        let p = words.as_mut_ptr();
+        assert_eq!(ryu_regalloc_bitset_or(p, p, 5), 0);
+        assert_eq!(words, [1, 0, 3, 4, 5]);
+        assert_eq!(ryu_regalloc_bitset_and_not(p, p, 5), 1);
+        assert_eq!(words, [0; 5]);
+        assert_eq!(ryu_regalloc_bitset_and_not(p, p, 5), 0);
+    }
 }

@@ -3,6 +3,8 @@ use std::ptr;
 
 #[test]
 fn test_step1_null_pointer_safety() {
+    // SAFETY: every call passes null for a required pointer, which the FFI rejects before
+    // dereferencing anything.
     unsafe {
         let dummy = [0u8; 64];
         let idct_in = [0i32; 64];
@@ -121,6 +123,8 @@ fn test_step1_null_pointer_safety() {
 
 #[test]
 fn test_step1_boundary_and_invariants() {
+    // SAFETY: every call is rejected by argument validation before the (local) buffers are
+    // turned into slices.
     unsafe {
         let mut dummy = [0u8; 128];
         let idct_in = [0i32; 64];

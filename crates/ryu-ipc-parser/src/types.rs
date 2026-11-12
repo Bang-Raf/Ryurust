@@ -2,8 +2,9 @@ pub const MAX_BUFFERS: usize = 16;
 pub const MAX_HANDLES: usize = 16;
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum IpcMessageType {
+    #[default]
     Invalid = 0,
     LegacyRequest = 1,
     CloseSession = 2,
@@ -14,12 +15,6 @@ pub enum IpcMessageType {
     ControlWithContext = 7,
     TipcCloseSession = 0xF,
     TipcCommandRegister = 0x10,
-}
-
-impl Default for IpcMessageType {
-    fn default() -> Self {
-        IpcMessageType::Invalid
-    }
 }
 
 impl From<u32> for IpcMessageType {

@@ -21,7 +21,7 @@ impl<'a> BoolDecoder<'a> {
 
         // Initialize value with first 2 bytes if available
         let mut val = 0usize;
-        if decoder.buffer.len() > 0 {
+        if !decoder.buffer.is_empty() {
             val = (decoder.buffer[0] as usize) << 8;
             decoder.pos = 1;
         }

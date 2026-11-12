@@ -23,7 +23,7 @@ pub fn get_line_remainders(
     let out_stride = align_up(width * out_bpp, HOST_STRIDE_ALIGNMENT);
     let out_remainder = out_stride / out_bpp - width;
 
-    let height = if stride > 0 { length / stride } else { 0 };
+    let height = length.checked_div(stride).unwrap_or(0);
     (remainder, out_remainder, height)
 }
 
@@ -230,7 +230,7 @@ pub fn convert_bgra8_to_rgba8(src: &[u8], dst: &mut [u8]) -> Result<(), &'static
     if src.len() != dst.len() {
         return Err(ERR_BUFFER_LENGTH_MISMATCH);
     }
-    if src.len() % 4 != 0 {
+    if !src.len().is_multiple_of(4) {
         return Err(ERR_LENGTH_NOT_PIXEL_MULTIPLE);
     }
     let (src_px, _) = src.as_chunks::<4>();

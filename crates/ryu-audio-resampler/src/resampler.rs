@@ -54,8 +54,7 @@ pub fn resample_default(
     let mut input_idx = 0usize;
     let mut frac = *fraction;
 
-    let count = sample_count.min(output.len());
-    for i in 0..count {
+    for out in output.iter_mut().take(sample_count) {
         let base_idx = (((frac * 128.0) as usize) & 127) * 4;
         let p = &parameters[base_idx..base_idx + 4];
 
@@ -80,7 +79,7 @@ pub fn resample_default(
             0.0
         };
 
-        output[i] = (in0 * p[0] + in1 * p[1] + in2 * p[2] + in3 * p[3]).round();
+        *out = (in0 * p[0] + in1 * p[1] + in2 * p[2] + in3 * p[3]).round();
 
         frac += ratio;
         input_idx += frac as usize;
@@ -102,8 +101,7 @@ pub fn resample_high(
     let mut input_idx = 0usize;
     let mut frac = *fraction;
 
-    let count = sample_count.min(output.len());
-    for i in 0..count {
+    for out in output.iter_mut().take(sample_count) {
         let base_idx = (((frac * 128.0) as usize) & 127) * 8;
         let p = &parameters[base_idx..base_idx + 8];
 
@@ -117,7 +115,7 @@ pub fn resample_high(
             sum += in_val * p[k];
         }
 
-        output[i] = sum.round();
+        *out = sum.round();
 
         frac += ratio;
         input_idx += frac as usize;
@@ -138,8 +136,7 @@ pub fn resample_low(
     let mut input_idx = 0usize;
     let mut frac = *fraction;
 
-    let count = sample_count.min(output.len());
-    for i in 0..count {
+    for out in output.iter_mut().take(sample_count) {
         let val = if frac > 1.0 {
             if input_idx + 1 < input.len() {
                 input[input_idx + 1]
@@ -154,7 +151,7 @@ pub fn resample_low(
             }
         };
 
-        output[i] = val as f32;
+        *out = val as f32;
 
         frac += ratio;
         input_idx += frac as usize;

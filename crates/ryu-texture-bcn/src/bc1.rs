@@ -82,8 +82,8 @@ pub fn decode_bc1_block(input: &[u8; 8], output: &mut [u32; 16]) {
     clut[3] = bc1_lerp_rgb3(clut[0], clut[1], c0, c1);
 
     let mut indices = u32::from_le_bytes(input[4..8].try_into().unwrap());
-    for i in 0..16 {
-        output[i] = clut[(indices & 3) as usize];
+    for out in output.iter_mut() {
+        *out = clut[(indices & 3) as usize];
         indices >>= 2;
     }
 }
@@ -97,8 +97,8 @@ pub fn decode_bc1_surface(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let expected_src = blocks_x * blocks_y * 8;
     let expected_dst = width * height * 4;
     if src.len() < expected_src {

@@ -13,11 +13,22 @@ pub const NVDEC_STATUS_INVALID_ARGUMENT: i32 = -2;
 pub const NVDEC_STATUS_BUFFER_TOO_SMALL: i32 = -3;
 pub const NVDEC_STATUS_CORRUPT_BITSTREAM: i32 = -4;
 
+pub const RYU_VIDEO_NVDEC_VERSION: u32 = 0x0001_0000; // v1.0.0
+
+/// Kept for compatibility with existing callers; same value as `ryu_video_nvdec_version`.
 #[no_mangle]
 pub extern "C" fn ryu_nvdec_get_version() -> u32 {
-    0x00010000 // v1.0.0
+    RYU_VIDEO_NVDEC_VERSION
 }
 
+#[no_mangle]
+pub extern "C" fn ryu_video_nvdec_version() -> u32 {
+    RYU_VIDEO_NVDEC_VERSION
+}
+
+/// # Safety
+/// `input` must be valid for reads of 16 coefficients and `dest` for reads and writes of
+/// `stride * 4` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_idct4x4_add(
     input: *const i32,
@@ -38,6 +49,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct4x4_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `input` must be valid for reads of 64 coefficients and `dest` for reads and writes of
+/// `stride * 8` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_idct8x8_add(
     input: *const i32,
@@ -58,6 +72,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct8x8_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `input` must be valid for reads of 256 coefficients and `dest` for reads and writes of
+/// `stride * 16` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_idct16x16_add(
     input: *const i32,
@@ -78,6 +95,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct16x16_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `input` must be valid for reads of 1024 coefficients and `dest` for reads and writes of
+/// `stride * 32` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_idct32x32_add(
     input: *const i32,
@@ -98,6 +118,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct32x32_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `input` must be valid for reads of 16 coefficients and `dest` for reads and writes of
+/// `stride * 4` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_iht4x4_add(
     input: *const i32,
@@ -109,7 +132,7 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht4x4_add(
     if input.is_null() || dest.is_null() {
         return NVDEC_STATUS_NULL_POINTER;
     }
-    if stride < 4 || tx_type < 0 || tx_type > 3 || eob < 0 {
+    if stride < 4 || !(0..=3).contains(&tx_type) || eob < 0 {
         return NVDEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -119,6 +142,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht4x4_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `input` must be valid for reads of 64 coefficients and `dest` for reads and writes of
+/// `stride * 8` bytes, without overlapping.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_iht8x8_add(
     input: *const i32,
@@ -130,7 +156,7 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht8x8_add(
     if input.is_null() || dest.is_null() {
         return NVDEC_STATUS_NULL_POINTER;
     }
-    if stride < 8 || tx_type < 0 || tx_type > 3 || eob < 0 {
+    if stride < 8 || !(0..=3).contains(&tx_type) || eob < 0 {
         return NVDEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -140,6 +166,8 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht8x8_add(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `s` must be valid for reads and writes of `buffer_len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_edge(
     s: *mut u8,
@@ -174,6 +202,9 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_edge(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// The Y, U and V planes must be valid for reads and writes of `y_len`, `u_len` and `v_len`
+/// bytes respectively and must not overlap each other.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_frame(
     y_ptr: *mut u8,
@@ -196,8 +227,8 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_frame(
         return NVDEC_STATUS_INVALID_ARGUMENT;
     }
     if y_len < height * y_stride
-        || u_len < ((height + 1) / 2) * uv_stride
-        || v_len < ((height + 1) / 2) * uv_stride
+        || u_len < height.div_ceil(2) * uv_stride
+        || v_len < height.div_ceil(2) * uv_stride
     {
         return NVDEC_STATUS_BUFFER_TOO_SMALL;
     }
@@ -221,6 +252,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_frame(
     NVDEC_STATUS_OK
 }
 
+/// # Safety
+/// `bitstream` must be valid for reads of `bitstream_len` bytes and `config` must point to a
+/// valid `Vp9FrameConfig`. The Y, U and V output planes must be valid for reads and writes of
+/// `y_len`, `u_len` and `v_len` bytes respectively and must not overlap each other or the inputs.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_nvdec_decode_vp9_frame(
     bitstream: *const u8,
@@ -265,5 +300,70 @@ pub unsafe extern "C" fn ryu_nvdec_decode_vp9_frame(
     ) {
         Ok(()) => NVDEC_STATUS_OK,
         Err(err) => err,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_exports_return_constant() {
+        assert_eq!(ryu_video_nvdec_version(), RYU_VIDEO_NVDEC_VERSION);
+        assert_eq!(ryu_nvdec_get_version(), RYU_VIDEO_NVDEC_VERSION);
+        assert_eq!(RYU_VIDEO_NVDEC_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        const E: i32 = NVDEC_STATUS_NULL_POINTER;
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(ryu_nvdec_vp9_idct4x4_add(null(), null_mut(), 4, 1), E);
+            assert_eq!(ryu_nvdec_vp9_idct8x8_add(null(), null_mut(), 8, 1), E);
+            assert_eq!(ryu_nvdec_vp9_idct16x16_add(null(), null_mut(), 16, 1), E);
+            assert_eq!(ryu_nvdec_vp9_idct32x32_add(null(), null_mut(), 32, 1), E);
+            assert_eq!(ryu_nvdec_vp9_iht4x4_add(null(), null_mut(), 4, 0, 1), E);
+            assert_eq!(ryu_nvdec_vp9_iht8x8_add(null(), null_mut(), 8, 0, 1), E);
+            assert_eq!(
+                ryu_nvdec_vp9_loop_filter_edge(null_mut(), 64, 32, 8, 1, 1, 1, 4, 0),
+                E
+            );
+            assert_eq!(
+                ryu_nvdec_vp9_loop_filter_frame(
+                    null_mut(),
+                    64,
+                    null_mut(),
+                    16,
+                    null_mut(),
+                    16,
+                    8,
+                    8,
+                    8,
+                    4,
+                    1,
+                    0
+                ),
+                E
+            );
+            assert_eq!(
+                ryu_nvdec_decode_vp9_frame(
+                    null(),
+                    16,
+                    null(),
+                    null_mut(),
+                    64,
+                    null_mut(),
+                    16,
+                    null_mut(),
+                    16,
+                    8,
+                    4
+                ),
+                E
+            );
+        }
     }
 }

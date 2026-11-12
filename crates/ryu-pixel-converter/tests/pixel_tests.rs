@@ -49,8 +49,11 @@ fn ref_convert_r4g4b4a4(packed: u16) -> u32 {
 
 #[test]
 fn test_step1_null_and_zero_bounds() {
+    // SAFETY: pointers are null (rejected) or point at the distinct 64-byte locals `src`/`buf`,
+    // and no length passed exceeds 64.
     unsafe {
         let mut buf = [0u8; 64];
+        let src = [0u8; 64];
         // Null src
         assert_eq!(
             ryu_pixel_convert_r5g6b5_to_rgba8(std::ptr::null(), 32, buf.as_mut_ptr(), 64, 4),
@@ -58,17 +61,17 @@ fn test_step1_null_and_zero_bounds() {
         );
         // Null dst
         assert_eq!(
-            ryu_pixel_convert_r5g6b5_to_rgba8(buf.as_ptr(), 32, std::ptr::null_mut(), 64, 4),
+            ryu_pixel_convert_r5g6b5_to_rgba8(src.as_ptr(), 32, std::ptr::null_mut(), 64, 4),
             RYU_PIXEL_ERR_NULL_PTR
         );
         // Zero width (safe no-op)
         assert_eq!(
-            ryu_pixel_convert_r5g6b5_to_rgba8(buf.as_ptr(), 32, buf.as_mut_ptr(), 64, 0),
+            ryu_pixel_convert_r5g6b5_to_rgba8(src.as_ptr(), 32, buf.as_mut_ptr(), 64, 0),
             RYU_PIXEL_SUCCESS
         );
         // Destination buffer too small
         assert_eq!(
-            ryu_pixel_convert_r5g6b5_to_rgba8(buf.as_ptr(), 32, buf.as_mut_ptr(), 16, 4),
+            ryu_pixel_convert_r5g6b5_to_rgba8(src.as_ptr(), 32, buf.as_mut_ptr(), 16, 4),
             RYU_PIXEL_ERR_BUFFER_TOO_SMALL
         );
     }
@@ -94,8 +97,8 @@ fn test_step2_convert_r4g4_to_r4g4b4a4() {
     let mut dst = vec![0u8; src.len() * 2];
 
     convert_r4g4_to_r4g4b4a4(&src, &mut dst, 8).unwrap();
-    for (i, chunk) in dst.chunks_exact(2).enumerate() {
-        let got = u16::from_le_bytes([chunk[0], chunk[1]]);
+    for (i, chunk) in dst.as_chunks::<2>().0.iter().enumerate() {
+        let got = u16::from_le_bytes(*chunk);
         assert_eq!(got, src[i] as u16, "R4G4 expansion mismatch at {}", i);
     }
 }
@@ -158,9 +161,9 @@ fn test_step2_convert_bgra8_to_rgba8() {
     let mut dst_bytes = vec![0u8; 16];
     convert_bgra8_to_rgba8(&src_bytes, &mut dst_bytes).unwrap();
 
-    for (i, chunk) in dst_bytes.chunks_exact(4).enumerate() {
+    for (i, chunk) in dst_bytes.as_chunks::<4>().0.iter().enumerate() {
         let expected = convert_bgra8_pixel(src32[i]);
-        assert_eq!(u32::from_le_bytes(chunk.try_into().unwrap()), expected);
+        assert_eq!(u32::from_le_bytes(*chunk), expected);
     }
 }
 
@@ -282,8 +285,13 @@ fn test_misaligned_bgra8_to_rgba8() {
 
     convert_bgra8_to_rgba8(&src_backing[1..], dst).unwrap();
 
-    for (s, d) in src_data.chunks_exact(4).zip(dst.chunks_exact(4)) {
-        assert_eq!(d, [s[2], s[1], s[0], s[3]]);
+    for (s, d) in src_data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(dst.as_chunks::<4>().0)
+    {
+        assert_eq!(*d, [s[2], s[1], s[0], s[3]]);
     }
 }
 
@@ -303,6 +311,7 @@ fn test_bgra8_length_must_be_pixel_multiple() {
         Err(ERR_BUFFER_LENGTH_MISMATCH)
     );
 
+    // SAFETY: `src`, `dst` and `short` are distinct locals at least as long as the lengths passed.
     unsafe {
         assert_eq!(
             ryu_pixel_convert_bgra8_to_rgba8(src.as_ptr(), 6, dst.as_mut_ptr(), 6),

@@ -70,11 +70,11 @@ fn test_void_extent_ldr_block_decompression() {
     // In little-endian u32: (A << 24) | (B << 16) | (G << 8) | R
     let expected_rgba8 = (0xFF << 24) | (0x40 << 16) | (0x80 << 8) | 0xFF;
 
-    for i in 0..16 {
+    for (i, &pixel) in out_pixels[..16].iter().enumerate() {
         assert_eq!(
-            out_pixels[i], expected_rgba8,
+            pixel, expected_rgba8,
             "Pixel {} mismatch: expected 0x{:08X}, got 0x{:08X}",
-            i, expected_rgba8, out_pixels[i]
+            i, expected_rgba8, pixel
         );
     }
 }
@@ -131,6 +131,7 @@ fn test_ffi_null_safety() {
     }
 }
 
+#[cfg(feature = "parallel")]
 #[test]
 fn test_dual_sequential_and_parallel_consistency() {
     // Create an image with 4 void extent blocks (8x8 pixels with 4x4 blocks)
@@ -216,5 +217,151 @@ fn test_random_blocks_never_panic() {
                 assert!(out_pixels[..bw * bh].iter().all(|&p| p == ASTC_ERROR_COLOR));
             }
         }
+    }
+}
+
+/// A void-extent LDR block of a single colour (16-bit UNORM channels).
+fn void_extent_block(r: u16, g: u16, b: u16, a: u16) -> [u8; 16] {
+    let mut stream = BitStream128::empty();
+    stream.write_bits(0x5FC, 11);
+    stream.write_bits(1, 1);
+    for _ in 0..4 {
+        stream.write_bits(0x1FFF, 13);
+    }
+    for c in [r, g, b, a] {
+        stream.write_bits(c as u32, 16);
+    }
+    stream.to_le_bytes()
+}
+
+/// 8x8 texture of 4x4 blocks (2x2 grid); block `i` has colour `0x10 * (i + 1)` in R.
+fn four_block_texture() -> Vec<u8> {
+    (0..4u16)
+        .flat_map(|i| void_extent_block(0x1000 * (i + 1), 0x2000, 0x3000, 0xFF00))
+        .collect()
+}
+
+fn texel(out: &[u8], x: usize, y: usize) -> [u8; 4] {
+    out[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4]
+        .try_into()
+        .unwrap()
+}
+
+type ImageDecoder = fn(&[u8], &mut [u8], usize, usize, usize, usize, usize, usize, usize) -> bool;
+type FfiImageDecoder = unsafe extern "C" fn(
+    *const u8,
+    usize,
+    *mut u8,
+    usize,
+    i32,
+    i32,
+    i32,
+    i32,
+    i32,
+    i32,
+    i32,
+) -> i32;
+
+/// Sequential and parallel image decoders, Rust API and FFI. Without the `parallel`
+/// feature the parallel FFI entry point falls back to the sequential decoder.
+fn image_decoders() -> Vec<(ImageDecoder, FfiImageDecoder)> {
+    vec![
+        (decode_astc_to_rgba8, ryu_astc_decode_to_rgba8),
+        #[cfg(feature = "parallel")]
+        (
+            decode_astc_to_rgba8_parallel,
+            ryu_astc_decode_to_rgba8_parallel,
+        ),
+        #[cfg(not(feature = "parallel"))]
+        (decode_astc_to_rgba8, ryu_astc_decode_to_rgba8_parallel),
+    ]
+}
+
+#[test]
+fn test_all_valid_blocks_report_success() {
+    let input = four_block_texture();
+    for (decode, ffi_decode) in image_decoders() {
+        let mut out = vec![0u8; 8 * 8 * 4];
+        assert!(decode(&input, &mut out, 4, 4, 8, 8, 1, 1, 1));
+        for (i, (bx, by)) in [(0, 0), (4, 0), (0, 4), (4, 4)].into_iter().enumerate() {
+            assert_eq!(
+                texel(&out, bx, by),
+                [0x10 * (i as u8 + 1), 0x20, 0x30, 0xFF]
+            );
+        }
+
+        let mut ffi_out = vec![0u8; out.len()];
+        let status = unsafe {
+            ffi_decode(
+                input.as_ptr(),
+                input.len(),
+                ffi_out.as_mut_ptr(),
+                ffi_out.len(),
+                4,
+                4,
+                8,
+                8,
+                1,
+                1,
+                1,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(ffi_out, out);
+    }
+}
+
+#[test]
+fn test_invalid_block_reports_failure_and_is_magenta() {
+    let mut input = four_block_texture();
+    // Block 2 (bottom-left): all zeros is a reserved block mode.
+    input[2 * 16..3 * 16].fill(0);
+    let magenta = ASTC_ERROR_COLOR.to_le_bytes();
+
+    for (decode, ffi_decode) in image_decoders() {
+        let mut out = vec![0u8; 8 * 8 * 4];
+        assert!(!decode(&input, &mut out, 4, 4, 8, 8, 1, 1, 1));
+
+        for y in 0..8 {
+            for x in 0..8 {
+                let block = (y / 4) * 2 + x / 4;
+                let expected = if block == 2 {
+                    magenta
+                } else {
+                    [0x10 * (block as u8 + 1), 0x20, 0x30, 0xFF]
+                };
+                assert_eq!(texel(&out, x, y), expected, "texel ({x}, {y})");
+            }
+        }
+
+        let mut ffi_out = vec![0u8; out.len()];
+        let status = unsafe {
+            ffi_decode(
+                input.as_ptr(),
+                input.len(),
+                ffi_out.as_mut_ptr(),
+                ffi_out.len(),
+                4,
+                4,
+                8,
+                8,
+                1,
+                1,
+                1,
+            )
+        };
+        assert_eq!(status, 1);
+        assert_eq!(ffi_out, out);
+    }
+}
+
+#[test]
+fn test_short_buffers_report_failure_without_panicking() {
+    let input = four_block_texture();
+    for (decode, _) in image_decoders() {
+        let mut out = vec![0u8; 8 * 8 * 4 - 1];
+        assert!(!decode(&input, &mut out, 4, 4, 8, 8, 1, 1, 1));
+        let mut out = vec![0u8; 8 * 8 * 4];
+        assert!(!decode(&input[..48], &mut out, 4, 4, 8, 8, 1, 1, 1));
     }
 }

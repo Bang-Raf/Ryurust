@@ -186,7 +186,7 @@ pub fn serialize_cmif(
         let desc = &msg.ptr_buffs[i];
         let mut w0: u32 = (((desc.position & 0x0f_0000_0000) >> 20) as u32)
             | (((desc.position & 0x70_0000_0000) >> 30) as u32);
-        w0 |= (desc.index & 0x03f) << 0;
+        w0 |= desc.index & 0x03f;
         w0 |= (desc.index & 0x1c0) << 3;
         w0 |= (desc.size as u32) << 16;
 
@@ -232,8 +232,11 @@ pub fn serialize_tipc(
     word0 |= (msg.recv_buff_count & 0xf) << 24;
     word0 |= (msg.xchg_buff_count & 0xf) << 28;
 
-    // As in C# `GetBytesTipc`, TIPC carries no pointer (X) descriptors, so
-    // `ptr_buff_count` is not encoded.
+    // TIPC has no pointer (X) descriptors. C# `GetStreamTipc` asserts
+    // `PtrBuff.Count == 0`; reject such a message instead of dropping them.
+    if msg.ptr_buff_count != 0 {
+        return Err(IpcSerializeError::InvalidData);
+    }
     validate_counts(msg, false)?;
     let handle_stream_len = handle_stream_len(msg);
     let buff_desc_len = buff_desc_bytes(msg);

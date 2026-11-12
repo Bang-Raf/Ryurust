@@ -18,5 +18,5 @@ pub const fn align_down(value: usize, alignment: usize) -> usize {
 
 #[inline(always)]
 pub const fn div_round_up(value: usize, divisor: usize) -> usize {
-    (value + divisor - 1) / divisor
+    value.div_ceil(divisor)
 }

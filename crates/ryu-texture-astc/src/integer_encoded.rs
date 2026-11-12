@@ -38,10 +38,10 @@ impl IntegerEncoded {
         let mut total_bits = (self.number_bits as usize) * number_vals;
         match self.encoding {
             EIntegerEncoding::Trit => {
-                total_bits += (number_vals * 8 + 4) / 5;
+                total_bits += (number_vals * 8).div_ceil(5);
             }
             EIntegerEncoding::Quint => {
-                total_bits += (number_vals * 7 + 2) / 3;
+                total_bits += (number_vals * 7).div_ceil(3);
             }
             EIntegerEncoding::JustBits => {}
         }
@@ -73,7 +73,7 @@ const fn create_encoding_calc(mut max_val: usize) -> IntegerEncoded {
         }
 
         // Is max_val of the type 3*2^n - 1?
-        if (check % 3 == 0) && (((check / 3) & ((check / 3) - 1)) == 0) {
+        if check.is_multiple_of(3) && (((check / 3) & ((check / 3) - 1)) == 0) {
             return IntegerEncoded::new(
                 EIntegerEncoding::Trit,
                 ((check / 3 - 1) as u32).count_ones() as u8,
@@ -81,7 +81,7 @@ const fn create_encoding_calc(mut max_val: usize) -> IntegerEncoded {
         }
 
         // Is max_val of the type 5*2^n - 1?
-        if (check % 5 == 0) && (((check / 5) & ((check / 5) - 1)) == 0) {
+        if check.is_multiple_of(5) && (((check / 5) & ((check / 5) - 1)) == 0) {
             return IntegerEncoded::new(
                 EIntegerEncoding::Quint,
                 ((check / 5 - 1) as u32).count_ones() as u8,

@@ -57,10 +57,10 @@ fn test_toc_entries_parse() {
     let count = parse_toc_entries(&data, &mut entries).expect("should parse");
     assert_eq!(count, 100);
 
-    for i in 0..100 {
-        assert_eq!(entries[i].offset, (i as u64) * 1024);
-        assert_eq!(entries[i].uncompressed_size, 4096);
-        assert_eq!(entries[i].compressed_size, 1024);
+    for (i, entry) in entries.iter().enumerate() {
+        assert_eq!(entry.offset, (i as u64) * 1024);
+        assert_eq!(entry.uncompressed_size, 4096);
+        assert_eq!(entry.compressed_size, 1024);
     }
 }
 
@@ -95,6 +95,7 @@ fn test_ffi_c_abi() {
         reserved: 0,
     };
 
+    // SAFETY: `header_bytes` is a live 32-byte buffer and `out_header` a live local.
     unsafe {
         assert_eq!(
             ryu_shader_cache_validate_toc(header_bytes.as_ptr(), 32, TOCS_MAGIC, &mut out_header),
@@ -155,6 +156,7 @@ fn test_toc_entries_require_valid_header() {
         Err(TocError::BufferTooSmall)
     );
 
+    // SAFETY: the closure passes live slices with their own lengths.
     unsafe {
         let ffi = |d: &[u8], e: &mut [OffsetAndSize]| {
             ryu_shader_cache_parse_entries(d.as_ptr(), d.len(), e.as_mut_ptr(), e.len())

@@ -29,6 +29,8 @@ fn test_step1_struct_sizes_and_alignments() {
 
 #[test]
 fn test_step1_null_pointer_safety() {
+    // SAFETY: every call passes null for a required pointer, which the FFI rejects before
+    // dereferencing anything.
     unsafe {
         assert_eq!(
             ryu_dsp_clear_buffer(std::ptr::null_mut(), 100),
@@ -169,6 +171,8 @@ fn test_step1_empty_buffer_handling() {
     let param = BiquadFilterParameter::default();
     let mut state = BiquadFilterState::default();
 
+    // SAFETY: every call has zero length (or a valid local buffer/struct), so no memory
+    // outside the locals is touched.
     unsafe {
         assert_eq!(ryu_dsp_clear_buffer(out.as_mut_ptr(), 0), DSP_STATUS_OK);
         assert_eq!(ryu_dsp_clear_buffers(out.as_mut_ptr(), 0), DSP_STATUS_OK);

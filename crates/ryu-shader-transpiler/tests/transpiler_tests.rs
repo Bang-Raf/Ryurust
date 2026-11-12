@@ -22,6 +22,7 @@ fn test_step1_null_pointer_safety() {
     let mut out_words = [0u32; 128];
     let mut inst_cnt = 0usize;
 
+    // SAFETY: non-null pointers refer to live locals passed with their own lengths.
     unsafe {
         assert_eq!(
             ryu_shader_transpile_maxwell_to_spirv(
@@ -49,6 +50,7 @@ fn test_step1_invalid_bytecode_alignment() {
     let mut out_words = [0u32; 128];
     let bad_code = [0u8; 7]; // Not a multiple of 8 bytes!
 
+    // SAFETY: non-null pointers refer to live locals passed with their own lengths.
     unsafe {
         assert_eq!(
             ryu_shader_transpile_maxwell_to_spirv(
@@ -71,6 +73,7 @@ fn test_step1_insufficient_output_buffer() {
     let mut out_words = [0u32; 2]; // Way too small!
     let code = [0u8; 16];
 
+    // SAFETY: non-null pointers refer to live locals passed with their own lengths.
     unsafe {
         assert_eq!(
             ryu_shader_transpile_maxwell_to_spirv(

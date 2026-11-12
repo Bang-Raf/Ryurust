@@ -1,5 +1,7 @@
 use crate::arena::BumpArena;
-use crate::types::{Interval, RegisterMasksNative, MAX_REGISTERS};
+use crate::types::{
+    FixedRegisterConflict, Interval, RegisterMasksNative, MAX_REGISTERS, RUN_PASS_FIXED_CONFLICT,
+};
 
 /// Sentinel for "no interval" in the per-register index tables.
 const NONE: u32 = u32::MAX;
@@ -9,8 +11,11 @@ pub struct LinearScanEngine {
     pub intervals: Vec<Interval>,
     pub next_spill_offset: i32,
     /// Scratch for `run_pass`: for each fixed interval, the index of the next fixed interval
-    /// on the same (register class, register). Kept across passes so its capacity is reused.
+    /// on the same (register class, register). Also used as the permutation buffer when the
+    /// input has to be sorted. Kept across passes so its capacity is reused.
     fixed_links: Vec<u32>,
+    /// Conflict found by the most recent pass, if any.
+    last_conflict: Option<FixedRegisterConflict>,
 }
 
 impl Default for LinearScanEngine {
@@ -26,6 +31,7 @@ impl LinearScanEngine {
             intervals: Vec::with_capacity(1024),
             next_spill_offset: 0,
             fixed_links: Vec::with_capacity(1024),
+            last_conflict: None,
         }
     }
 
@@ -34,6 +40,7 @@ impl LinearScanEngine {
         self.arena.reset();
         self.intervals.clear();
         self.next_spill_offset = 0;
+        self.last_conflict = None;
     }
 
     #[inline]
@@ -64,24 +71,68 @@ impl LinearScanEngine {
         selected
     }
 
+    /// The fixed-register conflict that made the most recent pass fail, if it did.
+    /// Cleared by [`reset`](Self::reset) and at the start of every pass.
+    #[inline]
+    pub fn fixed_conflict(&self) -> Option<FixedRegisterConflict> {
+        self.last_conflict
+    }
+
+    /// Same as [`try_run_pass`](Self::try_run_pass), with the error folded into the return
+    /// value: returns the number of intervals that ended up in a register, or
+    /// [`RUN_PASS_FIXED_CONFLICT`] (`usize::MAX`) if two overlapping fixed intervals demand
+    /// the same register. The details are then available from
+    /// [`fixed_conflict`](Self::fixed_conflict).
+    pub fn run_pass(&mut self, masks: RegisterMasksNative) -> usize {
+        self.try_run_pass(masks).unwrap_or(RUN_PASS_FIXED_CONFLICT)
+    }
+
     /// Linear-scan register allocation over `self.intervals` (half-open `[start, end)`).
     ///
-    /// Each interval either gets a register (`assigned_reg >= 0`) for its whole lifetime or
-    /// is spilled (`assigned_reg == -1`, `spill_offset` set); intervals are not split.
-    /// Returns the number of intervals that ended up in a register.
+    /// The intervals are first ordered by `start` (stable: equal starts keep insertion
+    /// order; nothing is allocated for this). Each interval then either gets a register
+    /// (`assigned_reg >= 0`) for its whole lifetime or is spilled (`assigned_reg == -1`,
+    /// `spill_offset` set); intervals are not split. Returns the number of intervals that
+    /// ended up in a register.
     ///
-    /// Fixed intervals always get `fixed_reg`. A non-fixed interval is only given a register
-    /// that is free now *and* stays free until it ends, i.e. no fixed interval on that
-    /// register starts before its end (looked up through a per-register chain of upcoming
-    /// fixed intervals). If, when a fixed interval starts, its register is still held by a
-    /// non-fixed interval, that interval is evicted and spilled. Hence no two intervals live
-    /// at the same time share a register, provided fixed intervals that demand the same
-    /// register do not overlap each other (that would be an unsatisfiable input; both keep
-    /// their fixed register).
-    pub fn run_pass(&mut self, masks: RegisterMasksNative) -> usize {
+    /// Fixed intervals always get `fixed_reg` and are never spilled. A non-fixed interval is
+    /// only given a register that is free now *and* stays free until it ends, i.e. no fixed
+    /// interval on that register starts before its end (looked up through a per-register
+    /// chain of upcoming fixed intervals). Hence no two intervals live at the same time
+    /// share a register.
+    ///
+    /// # Spilling
+    ///
+    /// When no register is free for a non-fixed interval, the candidates are that interval
+    /// and the non-fixed intervals currently holding a register of its class; the one that
+    /// ends last is spilled (ties: the current interval, then the lowest register). If that
+    /// is an active interval, it loses its register for its whole lifetime and the current
+    /// interval takes the register over.
+    ///
+    /// This is the furthest-end-point heuristic of Poletto & Sarkar. The C#
+    /// `LinearScanAllocator` instead picks the register whose next use is furthest away
+    /// (`NextUseAfter`) and splits the evicted interval there; that needs per-interval use
+    /// lists and interval splitting, which this data model does not have
+    /// ([`Interval::next_use`] is a single value that never advances, and intervals stay
+    /// whole), so the end point stands in for the next use. [`Interval::weight`] is not
+    /// consulted either; the C# allocator has no spill weights.
+    ///
+    /// # Errors
+    ///
+    /// If two non-empty fixed intervals of the same register class and the same `fixed_reg`
+    /// (in `0..32`) overlap, the input is unsatisfiable. The pass then allocates nothing:
+    /// the intervals are left sorted, every `assigned_reg` and `spill_offset` is set to
+    /// `-1`, and the first such pair (in start order) is returned and kept for
+    /// [`fixed_conflict`](Self::fixed_conflict).
+    pub fn try_run_pass(
+        &mut self,
+        masks: RegisterMasksNative,
+    ) -> Result<usize, FixedRegisterConflict> {
+        self.last_conflict = None;
+
         let count = self.intervals.len();
         if count == 0 {
-            return 0;
+            return Ok(0);
         }
 
         // Check if already sorted (common in SSA IR) before sorting
@@ -93,7 +144,34 @@ impl LinearScanEngine {
             }
         }
         if !is_sorted {
-            self.intervals.sort_by_key(|iv| iv.start);
+            // Stable sort by start without the temporary buffer `sort_by_key` allocates:
+            // unstable-sort the indices on (start, original index), which is a total order
+            // and so gives exactly the stable result, then permute the intervals in place.
+            let order = &mut self.fixed_links;
+            let ivs = &mut self.intervals;
+            order.clear();
+            order.extend(0..count as u32);
+            order.sort_unstable_by_key(|&k| (ivs[k as usize].start, k));
+
+            // `order[j]` is the old index of the interval that belongs at `j`. Follow each
+            // cycle once, marking visited slots with `NONE`.
+            for i in 0..count {
+                if order[i] == NONE {
+                    continue;
+                }
+                let first = ivs[i];
+                let mut j = i;
+                loop {
+                    let k = order[j] as usize;
+                    order[j] = NONE;
+                    if k == i {
+                        ivs[j] = first;
+                        break;
+                    }
+                    ivs[j] = ivs[k];
+                    j = k;
+                }
+            }
         }
 
         let reg_count = (masks.registers_count as usize).min(MAX_REGISTERS);
@@ -128,12 +206,61 @@ impl LinearScanEngine {
             }
         }
         let mut pending_mask = [0u32; 2];
-        for c in 0..2 {
-            for r in 0..32 {
-                if next_fixed[c][r] != NONE {
-                    pending_mask[c] |= 1 << r;
+        for (mask, heads) in pending_mask.iter_mut().zip(&next_fixed) {
+            for (r, &head) in heads.iter().enumerate() {
+                if head != NONE {
+                    *mask |= 1 << r;
                 }
             }
+        }
+
+        // Two fixed intervals live at the same time on one register cannot both be honoured.
+        // Walk each chain, tracking the fixed interval seen so far that ends last. Empty
+        // intervals are live nowhere and are ignored.
+        let mut conflict: Option<(usize, usize)> = None;
+        for c in 0..2 {
+            let mut regs = pending_mask[c];
+            while regs != 0 {
+                let r = regs.trailing_zeros() as usize;
+                let mut last = NONE;
+                let mut j = next_fixed[c][r];
+                while j != NONE {
+                    let iv = &self.intervals[j as usize];
+                    if iv.end > iv.start {
+                        if last == NONE {
+                            last = j;
+                        } else {
+                            let prev = &self.intervals[last as usize];
+                            if prev.end > iv.start {
+                                // Report the pair whose second interval starts first.
+                                if conflict.is_none_or(|(_, second)| (j as usize) < second) {
+                                    conflict = Some((last as usize, j as usize));
+                                }
+                                break;
+                            }
+                            if iv.end > prev.end {
+                                last = j;
+                            }
+                        }
+                    }
+                    j = self.fixed_links[j as usize];
+                }
+                regs &= regs - 1;
+            }
+        }
+        if let Some((first, second)) = conflict {
+            let err = FixedRegisterConflict {
+                first_id: self.intervals[first].id,
+                second_id: self.intervals[second].id,
+                reg_type: self.intervals[second].reg_type,
+                reg: self.intervals[second].fixed_reg,
+            };
+            for iv in &mut self.intervals {
+                iv.assigned_reg = -1;
+                iv.spill_offset = -1;
+            }
+            self.last_conflict = Some(err);
+            return Err(err);
         }
 
         let mut allocated_count = 0;
@@ -171,12 +298,13 @@ impl LinearScanEngine {
                     if active_mask[c] & bit != 0 {
                         let h = holder[c][r] as usize;
                         if self.intervals[h].is_fixed {
-                            // Overlapping fixed intervals on one register: keep the register
-                            // reserved until the later of the two ends.
+                            // Only reachable when this interval is empty (overlapping
+                            // non-empty fixed intervals were rejected above): keep the
+                            // register reserved until the holder ends.
                             end = end.max(end_pos[c][r]);
                         } else {
                             // Evict the non-fixed holder. Unreachable with the free-until
-                            // check below, kept as a safety net.
+                            // checks below, kept as a safety net.
                             self.intervals[h].assigned_reg = -1;
                             self.intervals[h].spill_offset = self.next_spill_offset;
                             self.next_spill_offset += 8;
@@ -217,14 +345,47 @@ impl LinearScanEngine {
                     holder[c][r] = i as u32;
                     allocated_count += 1;
                 } else {
-                    self.intervals[i].assigned_reg = -1;
-                    self.intervals[i].spill_offset = self.next_spill_offset;
+                    // Nothing is free: spill whichever of the current interval and the
+                    // non-fixed active intervals ends last (see "Spilling" above).
+                    let mut victim = None;
+                    let mut victim_end = cur_end;
+                    let mut occupied = avail[c] & active_mask[c];
+                    while occupied != 0 {
+                        let r = occupied.trailing_zeros() as usize;
+                        let bit = 1u32 << r;
+                        // The holder was only given `r` because it stays free of fixed
+                        // intervals until the holder ends, so this also holds up to the
+                        // earlier `cur_end`; checked again to keep that local.
+                        if end_pos[c][r] > victim_end
+                            && !self.intervals[holder[c][r] as usize].is_fixed
+                            && (pending_mask[c] & bit == 0
+                                || self.intervals[next_fixed[c][r] as usize].start >= cur_end)
+                        {
+                            victim = Some(r);
+                            victim_end = end_pos[c][r];
+                        }
+                        occupied &= occupied - 1;
+                    }
+
+                    let spilled = if let Some(r) = victim {
+                        // The evicted interval and the current one swap places, so the
+                        // number of intervals in a register does not change.
+                        let h = holder[c][r] as usize;
+                        self.intervals[i].assigned_reg = r as i16;
+                        end_pos[c][r] = cur_end;
+                        holder[c][r] = i as u32;
+                        h
+                    } else {
+                        i
+                    };
+                    self.intervals[spilled].assigned_reg = -1;
+                    self.intervals[spilled].spill_offset = self.next_spill_offset;
                     self.next_spill_offset += 8;
                 }
             }
         }
 
-        allocated_count
+        Ok(allocated_count)
     }
 }
 
@@ -237,6 +398,8 @@ pub fn bitset_or_avx2(dst: &mut [u64], src: &[u64]) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && len >= 4 {
+            // SAFETY: AVX2 support was just checked at runtime, and `len` is at most the
+            // length of both slices.
             unsafe {
                 return bitset_or_avx2_inner(dst, src, len);
             }
@@ -254,6 +417,8 @@ pub fn bitset_or_avx2(dst: &mut [u64], src: &[u64]) -> bool {
     modified
 }
 
+/// # Safety
+/// The CPU must support AVX2, and `len <= dst.len().min(src.len())`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn bitset_or_avx2_inner(dst: &mut [u64], src: &[u64], len: usize) -> bool {
@@ -296,6 +461,8 @@ pub fn bitset_and_not(dst: &mut [u64], src: &[u64]) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") && len >= 4 {
+            // SAFETY: AVX2 support was just checked at runtime, and `len` is at most the
+            // length of both slices.
             unsafe {
                 return bitset_and_not_avx2_inner(dst, src, len);
             }
@@ -313,6 +480,8 @@ pub fn bitset_and_not(dst: &mut [u64], src: &[u64]) -> bool {
     modified
 }
 
+/// # Safety
+/// The CPU must support AVX2, and `len <= dst.len().min(src.len())`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn bitset_and_not_avx2_inner(dst: &mut [u64], src: &[u64], len: usize) -> bool {

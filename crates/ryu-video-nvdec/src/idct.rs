@@ -904,12 +904,10 @@ pub fn idct4x4_16_add(input: &[i32], dest: &mut [u8], stride: usize) {
             temp_in[j] = intermediate[j * 4 + i];
         }
         idct4(&temp_in, &mut temp_out);
-        for j in 0..4 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 4),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 4));
         }
     }
 }
@@ -940,12 +938,10 @@ pub fn iht4x4_16_add(input: &[i32], dest: &mut [u8], stride: usize, tx_type: i32
             1 | 3 => iadst4(&temp_in, &mut temp_out),
             _ => idct4(&temp_in, &mut temp_out),
         }
-        for j in 0..4 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 4),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 4));
         }
     }
 }
@@ -1002,12 +998,10 @@ pub fn idct8x8_64_add(input: &[i32], dest: &mut [u8], stride: usize) {
             temp_in[j] = intermediate[j * 8 + i];
         }
         idct8(&temp_in, &mut temp_out);
-        for j in 0..8 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 5),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 5));
         }
     }
 }
@@ -1038,12 +1032,10 @@ pub fn iht8x8_64_add(input: &[i32], dest: &mut [u8], stride: usize, tx_type: i32
             1 | 3 => iadst8(&temp_in, &mut temp_out),
             _ => idct8(&temp_in, &mut temp_out),
         }
-        for j in 0..8 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 5),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 5));
         }
     }
 }
@@ -1100,12 +1092,10 @@ pub fn idct16x16_256_add(input: &[i32], dest: &mut [u8], stride: usize) {
             temp_in[j] = intermediate[j * 16 + i];
         }
         idct16(&temp_in, &mut temp_out);
-        for j in 0..16 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 6),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 6));
         }
     }
 }
@@ -1167,12 +1157,10 @@ pub fn idct32x32_1024_add(input: &[i32], dest: &mut [u8], stride: usize) {
             temp_in[j] = intermediate[j * 32 + i];
         }
         idct32(&temp_in, &mut temp_out);
-        for j in 0..32 {
+        for (j, &out) in temp_out.iter().enumerate() {
             let row_offset = j * stride;
-            dest[row_offset + i] = clip_pixel_add(
-                dest[row_offset + i],
-                round_power_of_two(temp_out[j] as i64, 6),
-            );
+            dest[row_offset + i] =
+                clip_pixel_add(dest[row_offset + i], round_power_of_two(out as i64, 6));
         }
     }
 }

@@ -14,10 +14,19 @@ pub const DSP_STATUS_NULL_POINTER: i32 = -1;
 pub const DSP_STATUS_INVALID_ARGUMENT: i32 = -2;
 pub const DSP_STATUS_OUT_OF_BOUNDS: i32 = -3;
 
+pub const RYU_AUDIO_DSP_VERSION: u32 = 0x0001_0000;
+
+#[no_mangle]
+pub extern "C" fn ryu_audio_dsp_version() -> u32 {
+    RYU_AUDIO_DSP_VERSION
+}
+
 // Aliasing contract for the `output` / `input` pairs below: the two ranges must either be
 // disjoint or start at the same address (in-place processing, which is handled with a single
 // `&mut [f32]`). Partially overlapping ranges are not supported.
 
+/// # Safety
+/// `buffer` must be valid for writes of `count` floats.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_clear_buffer(buffer: *mut f32, count: usize) -> i32 {
     if buffer.is_null() {
@@ -31,6 +40,8 @@ pub unsafe extern "C" fn ryu_dsp_clear_buffer(buffer: *mut f32, count: usize) ->
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `buffers` must be valid for writes of `total_floats` floats.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_clear_buffers(buffers: *mut f32, total_floats: usize) -> i32 {
     if buffers.is_null() {
@@ -44,6 +55,9 @@ pub unsafe extern "C" fn ryu_dsp_clear_buffers(buffers: *mut f32, total_floats: 
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats. The ranges may overlap.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_copy_buffer(
     output: *mut f32,
@@ -64,6 +78,9 @@ pub unsafe extern "C" fn ryu_dsp_copy_buffer(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_mix(
     output: *mut f32,
@@ -94,6 +111,10 @@ pub unsafe extern "C" fn ryu_dsp_mix(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `last_sample_out` must be null or valid for a write of one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_mix_ramp(
     output: *mut f32,
@@ -132,6 +153,9 @@ pub unsafe extern "C" fn ryu_dsp_mix_ramp(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_volume(
     output: *mut f32,
@@ -162,6 +186,9 @@ pub unsafe extern "C" fn ryu_dsp_volume(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_volume_ramp(
     output: *mut f32,
@@ -193,6 +220,11 @@ pub unsafe extern "C" fn ryu_dsp_volume_ramp(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_biquad_filter(
     output: *mut f32,
@@ -224,6 +256,11 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix(
     output: *mut f32,
@@ -256,6 +293,12 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `param` and `state` must point to valid values; `state` must not be accessed by anything
+/// else during the call.
+/// `last_sample_out` must be null or valid for a write of one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix_ramp(
     output: *mut f32,
@@ -296,6 +339,11 @@ pub unsafe extern "C" fn ryu_dsp_biquad_filter_and_mix_ramp(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `param0`/`param1` and `state0`/`state1` must point to valid values; the two states must be
+/// distinct and not accessed by anything else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix(
     output: *mut f32,
@@ -347,6 +395,12 @@ pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `param0`/`param1` and `state0`/`state1` must point to valid values; the two states must be
+/// distinct and not accessed by anything else during the call.
+/// `last_sample_out` must be null or valid for a write of one float.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix_ramp(
     output: *mut f32,
@@ -407,6 +461,11 @@ pub unsafe extern "C" fn ryu_dsp_double_biquad_filter_and_mix_ramp(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `output` must be valid for writes and `input` for reads of `min(output_len, input_len)`
+/// floats; the two ranges must be disjoint or start at the same address (see above).
+/// `params` must be valid for reads and `states` for reads and writes of `stage_count`
+/// elements; `states` must not be accessed by anything else during the call.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_multi_tap_biquad_filter(
     output: *mut f32,
@@ -447,6 +506,11 @@ pub unsafe extern "C" fn ryu_dsp_multi_tap_biquad_filter(
     DSP_STATUS_OK
 }
 
+/// # Safety
+/// `buffers` must be valid for reads and writes of `buffer_count * sample_count` floats and
+/// `commands` for reads of `command_count` entries. `states` may be null, otherwise it must be
+/// valid for reads and writes of `state_count` elements; `last_samples` may be null, otherwise
+/// it must be valid for writes of `last_samples_count` floats. None of the ranges may overlap.
 #[no_mangle]
 pub unsafe extern "C" fn ryu_dsp_process_command_batch(
     buffers: *mut f32,
@@ -466,7 +530,11 @@ pub unsafe extern "C" fn ryu_dsp_process_command_batch(
         return DSP_STATUS_OK;
     }
 
-    let total_floats = buffer_count.saturating_mul(sample_count);
+    // A product that overflows cannot describe a real buffer; reject it instead of building
+    // an oversized slice.
+    let Some(total_floats) = buffer_count.checked_mul(sample_count) else {
+        return DSP_STATUS_INVALID_ARGUMENT;
+    };
     let mix_slice = slice::from_raw_parts_mut(buffers, total_floats);
     let cmd_slice = slice::from_raw_parts(commands, command_count);
 
@@ -492,5 +560,146 @@ pub unsafe extern "C" fn ryu_dsp_process_command_batch(
     ) {
         Ok(count) => count as i32,
         Err(err) => err,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr::{null, null_mut};
+
+    #[test]
+    fn version_export_returns_constant() {
+        assert_eq!(ryu_audio_dsp_version(), RYU_AUDIO_DSP_VERSION);
+        assert_eq!(RYU_AUDIO_DSP_VERSION, 0x0001_0000);
+    }
+
+    #[test]
+    fn null_pointers_are_rejected() {
+        const E: i32 = DSP_STATUS_NULL_POINTER;
+        // SAFETY: every call passes null for the required pointers, which each function
+        // rejects before touching memory.
+        unsafe {
+            assert_eq!(ryu_dsp_clear_buffer(null_mut(), 4), E);
+            assert_eq!(ryu_dsp_clear_buffers(null_mut(), 4), E);
+            assert_eq!(ryu_dsp_copy_buffer(null_mut(), 4, null(), 4), E);
+            assert_eq!(ryu_dsp_mix(null_mut(), 4, null(), 4, 1.0), E);
+            assert_eq!(
+                ryu_dsp_mix_ramp(null_mut(), 4, null(), 4, 0.0, 1.0, null_mut()),
+                E
+            );
+            assert_eq!(ryu_dsp_volume(null_mut(), 4, null(), 4, 1.0), E);
+            assert_eq!(ryu_dsp_volume_ramp(null_mut(), 4, null(), 4, 0.0, 1.0), E);
+            assert_eq!(
+                ryu_dsp_biquad_filter(null_mut(), 4, null(), 4, null(), null_mut()),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_biquad_filter_and_mix(null_mut(), 4, null(), 4, null(), null_mut(), 1.0),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_biquad_filter_and_mix_ramp(
+                    null_mut(),
+                    4,
+                    null(),
+                    4,
+                    null(),
+                    null_mut(),
+                    0.0,
+                    1.0,
+                    null_mut()
+                ),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_double_biquad_filter_and_mix(
+                    null_mut(),
+                    4,
+                    null(),
+                    4,
+                    null(),
+                    null(),
+                    null_mut(),
+                    null_mut(),
+                    1.0
+                ),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_double_biquad_filter_and_mix_ramp(
+                    null_mut(),
+                    4,
+                    null(),
+                    4,
+                    null(),
+                    null(),
+                    null_mut(),
+                    null_mut(),
+                    0.0,
+                    1.0,
+                    null_mut()
+                ),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_multi_tap_biquad_filter(null_mut(), 4, null(), 4, null(), null_mut(), 2),
+                E
+            );
+            assert_eq!(
+                ryu_dsp_process_command_batch(
+                    null_mut(),
+                    1,
+                    4,
+                    null(),
+                    1,
+                    null_mut(),
+                    0,
+                    null_mut(),
+                    0
+                ),
+                E
+            );
+        }
+    }
+
+    #[test]
+    fn optional_last_sample_pointer_may_be_null() {
+        let input = [1.0f32; 4];
+        let mut output = [0.0f32; 4];
+        // SAFETY: both buffers hold 4 floats and are distinct; the out-pointer is optional.
+        let status = unsafe {
+            ryu_dsp_mix_ramp(
+                output.as_mut_ptr(),
+                4,
+                input.as_ptr(),
+                4,
+                1.0,
+                1.0,
+                null_mut(),
+            )
+        };
+        assert_eq!(status, DSP_STATUS_OK);
+    }
+
+    #[test]
+    fn command_batch_rejects_overflowing_size() {
+        let mut buf = [0.0f32; 4];
+        let cmd = [0u8; std::mem::size_of::<DspCommandEntry>()];
+        // SAFETY: the overflow is rejected before any slice is built from the pointers.
+        let status = unsafe {
+            ryu_dsp_process_command_batch(
+                buf.as_mut_ptr(),
+                usize::MAX,
+                2,
+                cmd.as_ptr().cast(),
+                1,
+                null_mut(),
+                0,
+                null_mut(),
+                0,
+            )
+        };
+        assert_eq!(status, DSP_STATUS_INVALID_ARGUMENT);
     }
 }

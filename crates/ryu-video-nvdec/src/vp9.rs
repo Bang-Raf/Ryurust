@@ -107,7 +107,7 @@ impl Vp9DecoderPipeline {
         if y_out.len() < height * y_stride {
             return Err(-3); // Buffer too small
         }
-        let uv_height = (height + 1) / 2;
+        let uv_height = height.div_ceil(2);
         if u_out.len() < uv_height * uv_stride || v_out.len() < uv_height * uv_stride {
             return Err(-3);
         }
@@ -119,8 +119,8 @@ impl Vp9DecoderPipeline {
 
         // Parse macroblock stream with boolean entropy decoder
         let mut reader = BoolDecoder::new(bitstream);
-        let blocks_x = (width + 15) / 16;
-        let blocks_y = (height + 15) / 16;
+        let blocks_x = width.div_ceil(16);
+        let blocks_y = height.div_ceil(16);
 
         let mut coeffs = [0i32; 64];
 
