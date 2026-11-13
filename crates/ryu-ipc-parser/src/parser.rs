@@ -87,8 +87,8 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
         msg.handle_desc.copy_count = to_copy_size as u32;
         for i in 0..to_copy_size {
             let handle = read_i32(data, &mut pos)?;
-            if i < MAX_HANDLES {
-                msg.handle_desc.copy_handles[i] = handle;
+            if let Some(slot) = msg.handle_desc.copy_handles.get_mut(i) {
+                *slot = handle;
             }
         }
 
@@ -96,8 +96,8 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
         msg.handle_desc.move_count = to_move_size as u32;
         for i in 0..to_move_size {
             let handle = read_i32(data, &mut pos)?;
-            if i < MAX_HANDLES {
-                msg.handle_desc.move_handles[i] = handle;
+            if let Some(slot) = msg.handle_desc.move_handles.get_mut(i) {
+                *slot = handle;
             }
         }
     }
@@ -117,8 +117,8 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
 
         let size = (w0 >> 16) as u16 as u64;
 
-        if i < MAX_BUFFERS {
-            msg.ptr_buffs[i] = IpcPtrBufferDesc {
+        if let Some(slot) = msg.ptr_buffs.get_mut(i) {
+            *slot = IpcPtrBufferDesc {
                 position,
                 size,
                 index,
@@ -200,8 +200,8 @@ pub fn parse_ipc_message(data: &[u8], cmd_ptr: i64) -> Result<ParsedIpcMessage, 
         let position = packed_value & 0xffff_ffff_ffff;
         let size = (packed_value >> 48) as u16 as u64;
 
-        if i < MAX_BUFFERS {
-            msg.recv_list_buffs[i] = IpcRecvListBufferDesc { position, size };
+        if let Some(slot) = msg.recv_list_buffs.get_mut(i) {
+            *slot = IpcRecvListBufferDesc { position, size };
         }
     }
 

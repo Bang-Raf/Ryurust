@@ -231,8 +231,8 @@ impl Radix48PageTable {
 
 impl Drop for Radix48PageTable {
     fn drop(&mut self) {
-        for l0_idx in 0..LEVEL_SIZE {
-            let l1 = self.l0[l0_idx];
+        for slot in self.l0.iter_mut() {
+            let l1 = *slot;
             if !l1.is_null() {
                 // SAFETY: all non-null entries are live `Box` allocations owned solely by
                 // this table; each is freed exactly once, children before their parent.
@@ -251,7 +251,7 @@ impl Drop for Radix48PageTable {
                     }
                     drop(Box::from_raw(l1));
                 }
-                self.l0[l0_idx] = ptr::null_mut();
+                *slot = ptr::null_mut();
             }
         }
     }

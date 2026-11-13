@@ -33,8 +33,9 @@ impl MaxwellStateTracker {
         let end_idx = (start_idx + reg_count).min(MAXWELL_NUM_REGISTERS);
 
         if group_index < 64 {
-            for idx in start_idx..end_idx {
-                self.register_to_group[idx] = group_index + 1;
+            // `get_mut` is None when start_idx is past the end, like the empty range was.
+            if let Some(regs) = self.register_to_group.get_mut(start_idx..end_idx) {
+                regs.fill(group_index + 1);
             }
             self.mapped_mask |= 1u64 << group_index;
         }

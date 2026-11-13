@@ -83,12 +83,12 @@ fn write_handle_desc(msg: &ParsedIpcMessage, out: &mut [u8], pos: &mut usize) {
         write_u64(msg.handle_desc.pid, out, pos);
     }
 
-    for i in 0..msg.handle_desc.copy_count as usize {
-        write_u32(msg.handle_desc.copy_handles[i] as u32, out, pos);
+    for &handle in &msg.handle_desc.copy_handles[..msg.handle_desc.copy_count as usize] {
+        write_u32(handle as u32, out, pos);
     }
 
-    for i in 0..msg.handle_desc.move_count as usize {
-        write_u32(msg.handle_desc.move_handles[i] as u32, out, pos);
+    for &handle in &msg.handle_desc.move_handles[..msg.handle_desc.move_count as usize] {
+        write_u32(handle as u32, out, pos);
     }
 }
 
@@ -182,8 +182,7 @@ pub fn serialize_cmif(
     write_handle_desc(msg, out, &mut pos);
 
     // Ptr buffs
-    for i in 0..msg.ptr_buff_count as usize {
-        let desc = &msg.ptr_buffs[i];
+    for desc in &msg.ptr_buffs[..msg.ptr_buff_count as usize] {
         let mut w0: u32 = (((desc.position & 0x0f_0000_0000) >> 20) as u32)
             | (((desc.position & 0x70_0000_0000) >> 30) as u32);
         w0 |= desc.index & 0x03f;
