@@ -1,0 +1,92 @@
+name: Windows
+
+# Tests the crates on Windows for every push and pull request. On a published
+# release, or when run by hand, also builds the Windows x64 package (Ryubing
+# with the Ryurust DLLs, as a .zip), checks it, uploads it as a workflow
+# artifact and, for a release, attaches it to that release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Ryurust version for the package name (e.g. 0.1.2)
+        required: true
+        default: dev
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - name: Benchmarks compile and run once
+        run: cargo bench -p ryurust-bench -- --test
+
+  package:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: Build package
+        run: scripts/package-windows.sh "${VERSION#v}"
+
+      - name: Check the DLLs load and export what the wrappers use
+        run: python scripts/check-exports.py "build/publish-win/lib" bindings/csharp
+
+      - name: Start the app in portable mode
+        shell: pwsh
+        run: |
+          $app = "build/publish-win"
+          New-Item -ItemType Directory -Force "$app/portable" | Out-Null
+          $p = Start-Process -FilePath "$app/Ryujinx.exe" -WorkingDirectory $app -PassThru
+          Start-Sleep -Seconds 30
+          if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+          $log = Get-ChildItem "$app/portable/Logs/*.log" | Select-Object -First 1
+          if (!$log) { throw "no log written" }
+          Get-Content $log | Select-String '\|[NEW]\|' | ForEach-Object { $_.Line }
+          if (!(Select-String -Path $log -Pattern 'ryurust\.' -Quiet)) { throw "version string missing" }
+          if (Select-String -Path $log -Pattern '\|E\|' -Quiet) { throw "errors in the startup log" }
+          Remove-Item -Recurse -Force "$app/portable"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ryurust-win_x64
+          path: |
+            dist/ryurust-*-win_x64.zip
+            dist/ryurust-*-win_x64.zip.sha256
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            dist/ryurust-*-win_x64.zip dist/ryurust-*-win_x64.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber

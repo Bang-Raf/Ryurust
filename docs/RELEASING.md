@@ -1,11 +1,14 @@
 # Releasing
 
-A release ships two things:
+A release ships three things:
 
 1. The Rust crates at a tagged version (`vX.Y.Z`).
 2. A Linux x64 build of Ryubing with those crates enabled, packaged as
    `ryurust-X.Y.Z-ryubing-<ryubing-version>-linux_x64.tar.xz` plus a
    `.sha256` file.
+3. The same for Windows x64:
+   `ryurust-X.Y.Z-ryubing-<ryubing-version>-win_x64.zip` plus a `.sha256`.
+   This one is built by CI (see "Windows package" below).
 
 ## How the Ryubing build is made
 
@@ -87,6 +90,38 @@ play games.
    ```bash
    gh workflow run publish-package.yml -f tag=v0.1.0 -f latest=false
    ```
+
+   Publishing the release also triggers
+   [`windows.yml`](../.github/workflows/windows.yml), which builds the
+   Windows package and attaches it to the release.
+
+## Windows package
+
+[`scripts/package-windows.sh`](../scripts/package-windows.sh) does the same as
+the Linux script for `win-x64`. The Rust DLLs are built for
+`x86_64-pc-windows-msvc` with `-C target-feature=+crt-static`, so they don't
+depend on the Visual C++ redistributable; that needs the MSVC toolchain, so the
+script runs on Windows (Git Bash). The .NET part cross-publishes from Linux, as
+upstream's release workflow does; to build on Linux, put DLLs built on Windows
+in a directory and set `RYURUST_DLL_DIR` to it.
+
+[`windows.yml`](../.github/workflows/windows.yml) runs the Rust tests and the
+bench smoke test on Windows for every push and pull request. On a published
+release, or when run by hand, it also builds the package and checks it:
+
+- [`scripts/check-exports.py`](../scripts/check-exports.py) loads every DLL
+  and checks each export the C# wrappers look up. A DLL that needs a runtime
+  the machine lacks fails to load here.
+- `Ryujinx.exe` is started in portable mode for 30 seconds; the log must show
+  the Ryurust version string and no errors.
+
+The package is uploaded as a workflow artifact. To build one without a
+release:
+
+```bash
+gh workflow run windows.yml -f version=0.1.2
+gh run download <run-id> -n ryurust-win_x64
+```
 
 ## Updating the Ryubing base
 

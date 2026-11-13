@@ -23,7 +23,7 @@ when a library isn't present.
 | Tests | 374, all passing (`cargo test --workspace`), plus golden tests against C# ASTC output and a LibHac-built RomFS image |
 | Benchmarks | 121 Criterion benchmarks, one suite per crate ([results](docs/BENCHMARKS.md)) |
 | Wired into Ryubing | 13 crates have C# wrappers; 10 of those are called from emulator code |
-| Platforms | Built and tested on x86_64 Linux. AVX2 paths are chosen at runtime with scalar fallbacks. |
+| Platforms | x86_64 Linux and Windows (the Windows build and test suite run in CI). AVX2 paths are chosen at runtime with scalar fallbacks. |
 | License | MIT |
 
 ## Crates
@@ -92,11 +92,16 @@ welcome.
 
 ## Download
 
-Each [GitHub release](https://github.com/Bang-Raf/Ryurust/releases) includes a
-Linux x64 build of Ryubing with the Ryurust libraries enabled
-(`ryurust-<version>-ryubing-<version>-linux_x64.tar.xz`). Extract it and run
-`./Ryujinx.sh`. You need your own legally dumped firmware, keys and games;
-none are included. How the package is built is described in
+Each [GitHub release](https://github.com/Bang-Raf/Ryurust/releases) includes
+builds of Ryubing with the Ryurust libraries enabled:
+
+- **Linux x64**: `ryurust-<version>-ryubing-<version>-linux_x64.tar.xz`.
+  Extract it and run `./Ryujinx.sh`.
+- **Windows x64**: `ryurust-<version>-ryubing-<version>-win_x64.zip`. Extract
+  it and run `Ryujinx.exe`. It needs no .NET or Visual C++ runtime install.
+
+You need your own legally dumped firmware, keys and games; none are
+included. How the package is built is described in
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
 The same package is published to GitHub Packages as
