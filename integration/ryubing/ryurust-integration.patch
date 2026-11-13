@@ -2507,6 +2507,109 @@ index da596e23bfef5d7b9195b3971c2bb336a91fa59b..b0483a31d7350d70f3a8430a246e84a8
              ulong hash64 = Id0 * 23 ^
                             Id1 * 23 ^
                             Id2 * 23 ^
+diff --git a/src/Ryujinx.HLE/FileSystem/NativeRomFsImage.cs b/src/Ryujinx.HLE/FileSystem/NativeRomFsImage.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb2b7a0fefb873f054d65889721ba40c35814f63
+--- /dev/null
++++ b/src/Ryujinx.HLE/FileSystem/NativeRomFsImage.cs
+@@ -0,0 +1,97 @@
++using LibHac.Fs;
++using System;
++
++namespace Ryujinx.HLE.FileSystem
++{
++    /// <summary>
++    /// Builds a <see cref="NativeRomFsIndexer"/> index for a RomFS image held in a LibHac storage.
++    /// </summary>
++    public static class NativeRomFsImage
++    {
++        private const int HeaderSize = 0x50;
++        private const long MaxTablesSize = 32 * 1024 * 1024;
++
++        /// <summary>
++        /// Reads the RomFS header and its four tables from <paramref name="storage"/> and creates a
++        /// native index. The tables usually sit after the file data, so they are copied into one
++        /// compact buffer with their offsets rewritten. The data offset at 0x48 is kept, so the
++        /// offsets the index returns are offsets into <paramref name="storage"/>.
++        /// </summary>
++        /// <returns>The index handle (free it with <see cref="NativeRomFsIndexer.Destroy"/>), or
++        /// <see cref="IntPtr.Zero"/> with <paramref name="failure"/> set.</returns>
++        public static IntPtr CreateIndex(IStorage storage, out string failure)
++        {
++            if (!NativeRomFsIndexer.IsAvailable)
++            {
++                failure = "native library not available";
++                return IntPtr.Zero;
++            }
++
++            try
++            {
++                if (storage.GetSize(out long length).IsFailure() || length < HeaderSize)
++                {
++                    failure = "image smaller than a RomFS header";
++                    return IntPtr.Zero;
++                }
++
++                byte[] header = new byte[HeaderSize];
++                if (storage.Read(0, header).IsFailure())
++                {
++                    failure = "header read failed";
++                    return IntPtr.Zero;
++                }
++
++                long total = HeaderSize;
++                for (int i = 0; i < 4; i++)
++                {
++                    ulong offset = BitConverter.ToUInt64(header, 0x08 + i * 0x10);
++                    ulong size = BitConverter.ToUInt64(header, 0x10 + i * 0x10);
++
++                    if (size > MaxTablesSize || offset > (ulong)length || size > (ulong)length - offset)
++                    {
++                        failure = "table offsets or sizes out of range";
++                        return IntPtr.Zero;
++                    }
++
++                    total += (long)size;
++                }
++
++                if (total > MaxTablesSize + HeaderSize)
++                {
++                    failure = "tables too large";
++                    return IntPtr.Zero;
++                }
++
++                byte[] meta = new byte[total];
++                header.CopyTo(meta, 0);
++                int at = HeaderSize;
++
++                for (int i = 0; i < 4; i++)
++                {
++                    long offset = (long)BitConverter.ToUInt64(header, 0x08 + i * 0x10);
++                    int size = (int)BitConverter.ToUInt64(header, 0x10 + i * 0x10);
++
++                    if (storage.Read(offset, meta.AsSpan(at, size)).IsFailure())
++                    {
++                        failure = "table read failed";
++                        return IntPtr.Zero;
++                    }
++
++                    BitConverter.TryWriteBytes(meta.AsSpan(0x08 + i * 0x10, 8), (ulong)at);
++                    at += size;
++                }
++
++                IntPtr handle = NativeRomFsIndexer.Create(meta);
++                failure = handle == IntPtr.Zero ? "the native indexer rejected the tables" : null;
++
++                return handle;
++            }
++            catch (Exception e)
++            {
++                failure = e.Message;
++                return IntPtr.Zero;
++            }
++        }
++    }
++}
 diff --git a/src/Ryujinx.HLE/FileSystem/NativeRomFsIndexer.cs b/src/Ryujinx.HLE/FileSystem/NativeRomFsIndexer.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..9586715687b2e6572a562d742637262fcb1959a4
@@ -2703,151 +2806,6 @@ index 0000000000000000000000000000000000000000..9586715687b2e6572a562d742637262f
 +        }
 +    }
 +}
-diff --git a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
-index 4e0fdf554633684eb31c1775d8cbad3d577ac236..3550edbaa20547a195632f4bd4216ad5c62e7c05 100644
---- a/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
-+++ b/src/Ryujinx.HLE/FileSystem/VirtualFileSystem.cs
-@@ -57,6 +57,7 @@ namespace Ryujinx.HLE.FileSystem
-             ReloadKeySet();
-             ModLoader = new ModLoader(); // Should only be created once
-             _romFsByPid = new ConcurrentDictionary<ulong, Stream>();
-+            _nativeRomFsByPid = new ConcurrentDictionary<ulong, IntPtr>();
-         }
- 
-         public void LoadRomFs(ulong pid, string fileName)
-@@ -69,6 +70,109 @@ namespace Ryujinx.HLE.FileSystem
- 
-                 return romfsStream;
-             });
-+
-+            TryIndexRomFs(pid, romfsStream);
-+        }
-+
-+        private readonly ConcurrentDictionary<ulong, IntPtr> _nativeRomFsByPid;
-+
-+        private void TryIndexRomFs(ulong pid, Stream romfsStream)
-+        {
-+            if (NativeRomFsIndexer.IsAvailable && romfsStream.CanSeek && romfsStream.Length >= 0x50)
-+            {
-+                string failure = "short header read";
-+
-+                try
-+                {
-+                    long pos = romfsStream.Position;
-+                    romfsStream.Position = 0;
-+                    byte[] headerBuf = new byte[0x50];
-+                    if (romfsStream.Read(headerBuf, 0, 0x50) == 0x50)
-+                    {
-+                        failure = "table offsets or sizes out of range";
-+
-+                        // The four tables usually sit after the file data, so a prefix of the
-+                        // image is not enough. Copy the header and the tables into one compact
-+                        // buffer and rewrite the table offsets to point into it. The data offset
-+                        // at 0x48 is kept, so the file offsets returned still index the image.
-+                        const long MaxTablesSize = 32 * 1024 * 1024;
-+                        long total = 0x50;
-+                        bool valid = true;
-+
-+                        for (int i = 0; i < 4; i++)
-+                        {
-+                            ulong offset = BitConverter.ToUInt64(headerBuf, 0x08 + i * 0x10);
-+                            ulong size = BitConverter.ToUInt64(headerBuf, 0x10 + i * 0x10);
-+
-+                            if (size > MaxTablesSize || offset > (ulong)romfsStream.Length || size > (ulong)romfsStream.Length - offset)
-+                            {
-+                                valid = false;
-+                                break;
-+                            }
-+
-+                            total += (long)size;
-+                        }
-+
-+                        if (valid && total <= MaxTablesSize + 0x50)
-+                        {
-+                            byte[] metaBuf = new byte[total];
-+                            Buffer.BlockCopy(headerBuf, 0, metaBuf, 0, 0x50);
-+                            int at = 0x50;
-+
-+                            for (int i = 0; i < 4 && valid; i++)
-+                            {
-+                                long offset = (long)BitConverter.ToUInt64(headerBuf, 0x08 + i * 0x10);
-+                                int size = (int)BitConverter.ToUInt64(headerBuf, 0x10 + i * 0x10);
-+
-+                                romfsStream.Position = offset;
-+                                romfsStream.ReadExactly(metaBuf, at, size);
-+                                BitConverter.TryWriteBytes(metaBuf.AsSpan(0x08 + i * 0x10, 8), (ulong)at);
-+                                at += size;
-+                            }
-+
-+                            IntPtr nativeHandle = NativeRomFsIndexer.Create(metaBuf);
-+                            if (nativeHandle != IntPtr.Zero)
-+                            {
-+                                failure = null;
-+                                Logger.Info?.Print(LogClass.Loader,
-+                                    $"Ryurust: native RomFS index built for pid {pid}: {NativeRomFsIndexer.GetFileCount(nativeHandle)} files, {NativeRomFsIndexer.GetDirCount(nativeHandle)} directories");
-+
-+                                _nativeRomFsByPid.AddOrUpdate(pid, nativeHandle, (p, old) =>
-+                                {
-+                                    NativeRomFsIndexer.Destroy(old);
-+                                    return nativeHandle;
-+                                });
-+                            }
-+                            else
-+                            {
-+                                failure = "the native indexer rejected the tables";
-+                            }
-+                        }
-+                    }
-+                    romfsStream.Position = pos;
-+                }
-+                catch (Exception e)
-+                {
-+                    // The C# path is unaffected.
-+                    failure = e.Message;
-+                }
-+
-+                if (failure != null)
-+                {
-+                    Logger.Warning?.Print(LogClass.Loader, $"Ryurust: native RomFS index not built for pid {pid} ({failure}), using the C# path");
-+                }
-+            }
-+        }
-+
-+        public bool TryGetRomFsFileInfo(ulong pid, string path, out ulong offset, out ulong size)
-+        {
-+            if (_nativeRomFsByPid.TryGetValue(pid, out IntPtr handle) && handle != IntPtr.Zero)
-+            {
-+                return NativeRomFsIndexer.FindFile(handle, path, out offset, out size);
-+            }
-+            offset = 0;
-+            size = 0;
-+            return false;
-         }
- 
-         public void SetRomFs(ulong pid, Stream romfsStream)
-@@ -79,6 +183,8 @@ namespace Ryujinx.HLE.FileSystem
- 
-                 return romfsStream;
-             });
-+
-+            TryIndexRomFs(pid, romfsStream);
-         }
- 
-         public Stream GetRomFs(ulong pid)
-@@ -671,6 +777,13 @@ namespace Ryujinx.HLE.FileSystem
-                 }
- 
-                 _romFsByPid.Clear();
-+
-+                foreach (IntPtr handle in _nativeRomFsByPid.Values)
-+                {
-+                    NativeRomFsIndexer.Destroy(handle);
-+                }
-+
-+                _nativeRomFsByPid.Clear();
-             }
-         }
-     }
 diff --git a/src/Ryujinx.HLE/HOS/Ipc/NativeIpcParser.cs b/src/Ryujinx.HLE/HOS/Ipc/NativeIpcParser.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..ac22d72fa5b9e24403ca7e4d406a86e0589dc0ed
@@ -3582,6 +3540,76 @@ index 0000000000000000000000000000000000000000..1823b49234b77b30e45047bfb43678b9
 +        }
 +    }
 +}
+diff --git a/src/Ryujinx.HLE/HOS/ModLoader.cs b/src/Ryujinx.HLE/HOS/ModLoader.cs
+index 4df929f35c21652723580686a598ce57684ff458..d7cb5f8de10fa8997ec3b3397cfe85c8a3222983 100644
+--- a/src/Ryujinx.HLE/HOS/ModLoader.cs
++++ b/src/Ryujinx.HLE/HOS/ModLoader.cs
+@@ -10,6 +10,7 @@ using LibHac.Util;
+ using Ryujinx.Common.Configuration;
+ using Ryujinx.Common.Logging;
+ using Ryujinx.Common.Utilities;
++using Ryujinx.HLE.FileSystem;
+ using Ryujinx.HLE.HOS.Kernel.Process;
+ using Ryujinx.HLE.Loaders.Executables;
+ using Ryujinx.HLE.Loaders.Mods;
+@@ -530,16 +531,50 @@ namespace Ryujinx.HLE.HOS
+ 
+             Logger.Info?.Print(LogClass.ModLoader, $"Replaced {fileSet.Count} file(s) over {count} mod(s). Processing base storage...");
+ 
+-            // And finally, the base romfs
++            // And finally, the base romfs. Files are located with the native index when it is
++            // available; any path it can't resolve goes through LibHac as before.
+             RomFsFileSystem baseRom = new(baseStorage);
+-            foreach (DirectoryEntryEx entry in baseRom.EnumerateEntries()
+-                                         .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
+-                                         .OrderBy(f => f.FullPath, StringComparer.Ordinal))
++            IntPtr nativeIndex = NativeRomFsImage.CreateIndex(baseStorage, out string nativeFailure);
++            int nativeHits = 0;
++            int baseFiles = 0;
++
++            try
+             {
+-                using UniqueRef<IFile> file = new();
++                foreach (DirectoryEntryEx entry in baseRom.EnumerateEntries()
++                                             .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
++                                             .OrderBy(f => f.FullPath, StringComparer.Ordinal))
++                {
++                    baseFiles++;
+ 
+-                baseRom.OpenFile(ref file.Ref, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+-                builder.AddFile(entry.FullPath, file.Release());
++                    if (nativeIndex != IntPtr.Zero &&
++                        NativeRomFsIndexer.FindFile(nativeIndex, entry.FullPath, out ulong offset, out ulong size))
++                    {
++                        builder.AddFile(entry.FullPath, new StorageFile(new SubStorage(baseStorage, (long)offset, (long)size), OpenMode.Read));
++                        nativeHits++;
++                        continue;
++                    }
++
++                    using UniqueRef<IFile> file = new();
++
++                    baseRom.OpenFile(ref file.Ref, entry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
++                    builder.AddFile(entry.FullPath, file.Release());
++                }
++            }
++            finally
++            {
++                if (nativeIndex != IntPtr.Zero)
++                {
++                    NativeRomFsIndexer.Destroy(nativeIndex);
++                }
++            }
++
++            if (nativeIndex != IntPtr.Zero)
++            {
++                Logger.Info?.Print(LogClass.ModLoader, $"Ryurust: native RomFS index located {nativeHits} of {baseFiles} base file(s)");
++            }
++            else if (NativeRomFsIndexer.IsAvailable)
++            {
++                Logger.Warning?.Print(LogClass.ModLoader, $"Ryurust: native RomFS index not built ({nativeFailure}), using LibHac for base files");
+             }
+ 
+             Logger.Info?.Print(LogClass.ModLoader, "Building new RomFS...");
 diff --git a/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs b/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs
 index 48622a2245369b0da6fd5803ea44e24f94850d4d..deb48b3f9c198d4c19f8035437cb779dfc84ccca 100644
 --- a/src/Ryujinx.HLE/HOS/Services/Nv/NvDrvServices/NvHostCtrl/Types/NvHostEvent.cs

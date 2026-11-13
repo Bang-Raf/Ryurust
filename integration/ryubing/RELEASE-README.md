@@ -10,12 +10,13 @@ issue tracker, not to the Ryubing project.
 ## What's different from upstream Ryubing
 
 - `lib/libryu_*.so` contains the 32 Ryurust libraries.
-- 13 C# subsystems have native wrappers; 9 are called by the emulator: JIT
+- 13 C# subsystems have native wrappers; 10 are called by the emulator: JIT
   register-allocator bitsets, audio mixing, Maxwell dirty-state scanning,
   uniform-buffer diffing, texture compatibility checks, Vulkan descriptor
-  updates, the kernel scheduler, the SurfaceFlinger queue and motion fusion.
-  A native RomFS index is built when a game loads, but lookups don't use it
-  yet.
+  updates, the kernel scheduler, the SurfaceFlinger queue, motion fusion, and
+  RomFS lookups when RomFS mods are applied. (A game reads its own RomFS
+  without the emulator looking up paths, so without mods the RomFS index is
+  not used.)
 - The log shows which libraries were used: each wrapper writes one
   `Ryurust:` line the first time the emulator calls it.
 - Every wrapper falls back to the original C# code if its library is missing

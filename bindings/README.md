@@ -40,12 +40,14 @@ the emulator never touches logs nothing.
 
 ### Integration status
 
-In the Ryubing integration branch, 9 of the 13 wrappers are called from
+In the Ryubing integration branch, 10 of the 13 wrappers are called from
 emulator code. `NativeIntervalTree`, `NativeShaderCache` and `NativeIpcParser`
-are defined but not called yet. `NativeRomFsIndexer` builds an index when a
-game's RomFS is set up, but no lookup queries it yet. That a wrapper is
-called does not mean it runs on every frame; that depends on the call site and
-on `IsAvailable`.
+are defined but not called yet. `NativeRomFsIndexer` is only used when RomFS
+mods are applied: `ModLoader` locates the base game's files with it (through
+`Ryujinx.HLE/FileSystem/NativeRomFsImage.cs`, which is in the integration
+patch only because it depends on LibHac). That a wrapper is called does not
+mean it runs on every frame; that depends on the call site and on
+`IsAvailable`.
 
 The other 19 crates have a C ABI (`ffi` module) but no C# wrapper.
 

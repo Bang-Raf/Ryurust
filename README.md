@@ -22,7 +22,7 @@ when a library isn't present.
 | Crates | 32 |
 | Tests | 369, all passing (`cargo test --workspace`), plus golden tests against C# ASTC output and a LibHac-built RomFS image |
 | Benchmarks | 121 Criterion benchmarks, one suite per crate ([results](docs/BENCHMARKS.md)) |
-| Wired into Ryubing | 13 crates have C# wrappers; 9 of those are called from emulator code |
+| Wired into Ryubing | 13 crates have C# wrappers; 10 of those are called from emulator code |
 | Platforms | Built and tested on x86_64 Linux. AVX2 paths are chosen at runtime with scalar fallbacks. |
 | License | MIT |
 
@@ -61,7 +61,7 @@ blank = no wrapper.
 | | `ryu-ipc-parser` | Horizon OS CMIF/TIPC IPC message parse and serialize | ○ |
 | | `ryu-surfaceflinger-queue` | SurfaceFlinger buffer queue and binder parcels | ● |
 | Storage | `ryu-storage-fs` | NCA AES-CTR decryption, LZ4/zstd, PFS0 lookup | |
-| | `ryu-romfs-indexer` | RomFS path lookup (index is built when a game loads, but lookups don't use it yet) | ○ |
+| | `ryu-romfs-indexer` | RomFS path lookup (used to locate base-game files when RomFS mods are applied) | ● |
 | JIT | `ryu-jit-regalloc` | Linear-scan register allocator and AVX2 bitset helpers for ARMeilleure | ● |
 | Input | `ryu-motion-fusion` | Mahony IMU sensor fusion for motion controls | ● |
 | Common | `ryu-common-hash` | xxHash3-128 (via `twox-hash`) with batching and a C ABI | |

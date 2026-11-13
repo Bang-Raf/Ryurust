@@ -26,7 +26,7 @@ the PR title.
 | `ryu-interval-tree` | At n = 128 the balanced tree is no faster than the old sorted array, and the slice query may be 5–15% slower (within benchmark noise). From a few hundred entries up it is clearly faster. |
 | `ryu-video-nvdec` | `stride * n` / `height * y_stride` aren't overflow-checked. A wrapped product gives a too-short slice and a panic (the process aborts at the C boundary), not memory corruption. |
 | `ryu-memory-pagetable` | `map_range` / `unmap_range` with a `size` near `u64::MAX` loop over that many pages. No overflow, but effectively a hang; callers must pass real sizes. |
-| `ryu-romfs-indexer` | **Built but never queried.** Since v0.1.1 Ryubing builds a native index when a game's RomFS is set up, but nothing calls `VirtualFileSystem.TryGetRomFsFileInfo`, the only method that queries it. Game RomFS reads go through LibHac's `RomFsFileSystem` as upstream. Earlier docs listed RomFS lookup as one of ten subsystems the emulator calls; that was wrong. Routing lookups through the index would mean wrapping LibHac's RomFS file system. |
+| `ryu-romfs-indexer` | **Only used with RomFS mods.** A game reads its own RomFS from the raw image (`OpenDataStorageByCurrentProcess`), so the emulator never looks up paths in it during play. The one place Ryubing does is `ModLoader.ApplyRomFsMods`, which locates every base-game file once when building a modded RomFS; that now uses the native index. Without RomFS mods the crate is not used. |
 
 ### Code-quality debt
 
@@ -72,8 +72,9 @@ What the log showed:
   Ryubing's stub for the online account service, which Ryurust doesn't touch.
 
 Limits: this build doesn't log which wrappers loaded their library. Found
-afterwards: the native RomFS index is built but no lookup uses it (see
-"Correctness gaps"), so these sessions don't test it. No frame-rate
+afterwards: the native RomFS index was built but nothing queried it, and no
+RomFS mods were installed, so these sessions don't test it (see "Correctness
+gaps"). No frame-rate
 measurements were taken.
 
 ### v0.1.0 (2026-11-11)
@@ -118,9 +119,16 @@ Limits of this test:
   `<library> found at <path> but not usable (<reason>)` (Warning, with the
   exception message or the missing exports). A wrapper that a game never
   touches logs nothing.
-- `VirtualFileSystem` logs whether the native RomFS index was built for each
-  process (`Loader` level), with file and directory counts or the reason it
-  wasn't.
+- The native RomFS index is now used where Ryubing actually looks up RomFS
+  paths: `ModLoader.ApplyRomFsMods`, when building a modded RomFS. Each
+  base-game file found by the index is added as a slice of the base image;
+  paths it can't resolve still go through LibHac. On a LibHac-built image
+  (314 files) every file is found, file contents match LibHac's, and the
+  rebuilt RomFS is byte-identical. The mod loader logs
+  `Ryurust: native RomFS index located N of M base file(s)`, or a warning
+  with the reason the index wasn't built.
+- The per-process index that v0.1.1 built at game load (and never queried)
+  is removed, so loading a game no longer copies the RomFS tables.
 
 ## Fixed in v0.1.1
 
