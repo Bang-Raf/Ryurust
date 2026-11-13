@@ -727,3 +727,36 @@ fn test_c_abi_bitset_same_buffer() {
         assert_eq!(ryu_regalloc_bitset_and_not(p, p, 5), 0);
     }
 }
+
+#[test]
+fn test_fixed_register_outside_mask_range_is_rejected() {
+    for bad_reg in [32i16, 63, 1000, -2] {
+        let mut engine = LinearScanEngine::new();
+        engine.add_interval(fixed(1, 0, 10, 0));
+        engine.add_interval(fixed(2, 5, 15, bad_reg));
+        let err = engine.try_run_pass(TWO_INT_REGS).unwrap_err();
+        assert_eq!((err.first_id, err.second_id, err.reg), (2, 2, bad_reg));
+        assert_eq!(engine.fixed_conflict(), Some(err));
+        assert!(err.to_string().contains("outside 0..32"), "{err}");
+        // Nothing was allocated.
+        for iv in &engine.intervals {
+            assert_eq!((iv.assigned_reg, iv.spill_offset), (-1, -1));
+        }
+    }
+
+    // Through the C ABI: the usual conflict sentinel, and the same id twice.
+    // SAFETY: `ctx` comes from `ryu_regalloc_create` and is destroyed at the end; outputs
+    // are valid locals.
+    unsafe {
+        let ctx = ryu_regalloc_create();
+        ryu_regalloc_add_interval(ctx, 4, 0, 10, 0, 1, 40);
+        assert_eq!(ryu_regalloc_run_pass(ctx, 0xFF, 0xFF, 16), usize::MAX);
+        let (mut first, mut second, mut reg_type, mut reg) = (0u32, 0u32, 9u8, 0i16);
+        assert_eq!(
+            ryu_regalloc_get_fixed_conflict(ctx, &mut first, &mut second, &mut reg_type, &mut reg),
+            1
+        );
+        assert_eq!((first, second, reg_type, reg), (4, 4, 0, 40));
+        ryu_regalloc_destroy(ctx);
+    }
+}

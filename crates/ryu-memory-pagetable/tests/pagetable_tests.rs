@@ -115,3 +115,78 @@ fn test_step2_batch_read_identical() {
 
     assert_eq!(out_values, expected_values);
 }
+
+#[test]
+fn test_unmap_range_huge_size_is_fast_and_complete() {
+    let mut pt = Radix48PageTable::new();
+    let pages = [
+        0x0u64,
+        0x1000,
+        0x20_0000,
+        0x4000_0000,
+        0x7fff_ffff_f000,
+        0x8000_0000_0000 - 0x1000,
+    ];
+    for &va in &pages {
+        pt.map(va, va | 0x1);
+    }
+
+    // Used to loop over 2^52 pages; must now finish at once and clear every page.
+    let start = std::time::Instant::now();
+    pt.unmap_range(0, u64::MAX);
+    assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    for &va in &pages {
+        assert_eq!(pt.read(va), 0, "{va:#x} still mapped");
+    }
+}
+
+#[test]
+fn test_unmap_range_matches_per_page_unmap() {
+    // Sparse mappings, then the same sub-range unmapped two ways.
+    let mut a = Radix48PageTable::new();
+    let mut b = Radix48PageTable::new();
+    let mut x = 0x2545_F491_4F6C_DD1Du64;
+    let mut vas = Vec::new();
+    for _ in 0..2000 {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let va = (x % (1 << 40)) & !(PAGE_SIZE as u64 - 1);
+        vas.push(va);
+        a.map(va, va | 1);
+        b.map(va, va | 1);
+    }
+    let (lo, size) = (0x40_0000_0000u64, 0x40_0000_0000u64);
+    a.unmap_range(lo, size);
+    for i in 0..size / PAGE_SIZE as u64 {
+        let va = lo + i * PAGE_SIZE as u64;
+        if b.read(va) != 0 {
+            b.unmap(va);
+        }
+    }
+    for &va in &vas {
+        assert_eq!(a.read(va), b.read(va), "{va:#x}");
+    }
+}
+
+#[test]
+fn test_ranges_are_clipped_to_48_bits() {
+    let mut pt = Radix48PageTable::new();
+    pt.map(0x0, 0xAAAA);
+
+    // A range running past the top of the 48-bit space used to wrap round and
+    // overwrite page 0.
+    let top = (1u64 << 48) - 2 * PAGE_SIZE as u64;
+    pt.map_range(top, 4 * PAGE_SIZE as u64, 0x5000);
+    assert_eq!(pt.read(top), 0x5000);
+    assert_eq!(pt.read(top + PAGE_SIZE as u64), 0x6000);
+    assert_eq!(pt.read(0x0), 0xAAAA);
+
+    pt.unmap_range(top, 4 * PAGE_SIZE as u64);
+    assert_eq!(pt.read(top), 0);
+    assert_eq!(pt.read(0x0), 0xAAAA);
+
+    // A range starting outside the space does nothing.
+    pt.map_range(1 << 48, PAGE_SIZE as u64, 0x7000);
+    assert_eq!(pt.read(0x0), 0xAAAA);
+}

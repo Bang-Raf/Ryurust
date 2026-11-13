@@ -57,7 +57,8 @@ pub struct RegisterMasksNative {
 }
 
 /// Two fixed intervals of the same register class are live at the same time and demand the
-/// same register, so no valid allocation exists.
+/// same register, so no valid allocation exists. `first_id == second_id` means a single
+/// fixed interval names a register outside `0..32`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FixedRegisterConflict {
     /// `id` of the conflicting interval that starts first.
@@ -72,18 +73,24 @@ pub struct FixedRegisterConflict {
 
 impl std::fmt::Display for FixedRegisterConflict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "fixed intervals {} and {} overlap and both require {} register {}",
-            self.first_id,
-            self.second_id,
-            if self.reg_type == 0 {
-                "integer"
-            } else {
-                "vector"
-            },
-            self.reg
-        )
+        let class = if self.reg_type == 0 {
+            "integer"
+        } else {
+            "vector"
+        };
+        if self.first_id == self.second_id {
+            write!(
+                f,
+                "fixed interval {} requires {} register {}, outside 0..32",
+                self.first_id, class, self.reg
+            )
+        } else {
+            write!(
+                f,
+                "fixed intervals {} and {} overlap and both require {} register {}",
+                self.first_id, self.second_id, class, self.reg
+            )
+        }
     }
 }
 

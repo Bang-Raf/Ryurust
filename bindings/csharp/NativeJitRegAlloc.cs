@@ -18,6 +18,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
         private delegate uint AddIntervalFn(IntPtr ctx, uint id, int start, int end, byte regType, byte isFixed, short fixedReg);
         private delegate nuint RunPassFn(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount);
         private delegate int GetResultFn(IntPtr ctx, nuint index, uint* outId, short* outReg, int* outSpill);
+        private delegate int GetFixedConflictFn(IntPtr ctx, uint* outFirstId, uint* outSecondId, byte* outRegType, short* outReg);
         private delegate int GetHighestIndexFn(int* span, nuint len);
         private delegate uint BitsetOrFn(ulong* dst, ulong* src, nuint count);
         private delegate uint BitsetAndNotFn(ulong* dst, ulong* src, nuint count);
@@ -29,6 +30,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
         private static readonly AddIntervalFn _addInterval;
         private static readonly RunPassFn _runPass;
         private static readonly GetResultFn _getResult;
+        private static readonly GetFixedConflictFn _getFixedConflict;
         private static readonly GetHighestIndexFn _getHighestIndex;
         private static readonly BitsetOrFn _bitsetOr;
         private static readonly BitsetAndNotFn _bitsetAndNot;
@@ -54,6 +56,7 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
                     _addInterval = GetExport<AddIntervalFn>(handle, "ryu_regalloc_add_interval");
                     _runPass = GetExport<RunPassFn>(handle, "ryu_regalloc_run_pass");
                     _getResult = GetExport<GetResultFn>(handle, "ryu_regalloc_get_result");
+                    _getFixedConflict = GetExport<GetFixedConflictFn>(handle, "ryu_regalloc_get_fixed_conflict");
                     _getHighestIndex = GetExport<GetHighestIndexFn>(handle, "ryu_regalloc_get_highest_index");
                     _bitsetOr = GetExport<BitsetOrFn>(handle, "ryu_regalloc_bitset_or");
                     _bitsetAndNot = GetExport<BitsetAndNotFn>(handle, "ryu_regalloc_bitset_and_not");
@@ -150,6 +153,12 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
                 : 0;
         }
 
+        /// <summary>
+        /// Runs the allocation pass. Returns the number of intervals that got a register, or
+        /// -1 if the fixed intervals can't be satisfied (two overlapping intervals fixed to one
+        /// register, or a fixed register outside 0..32); <see cref="GetFixedConflict"/> then
+        /// says which.
+        /// </summary>
         public static int RunPass(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount)
         {
             return ctx != IntPtr.Zero && _runPass != null
@@ -166,6 +175,25 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
             fixed (int* pSpill = &spillOffset)
             {
                 return _getResult(ctx, (nuint)index, pId, pReg, pSpill) == 1;
+            }
+        }
+
+        /// <summary>
+        /// After <see cref="RunPass"/> returned -1: the two conflicting fixed intervals (in start
+        /// order), their register class and register. <paramref name="firstId"/> equals
+        /// <paramref name="secondId"/> when one interval names a register outside 0..32.
+        /// Returns false if the last pass had no conflict or the export is missing.
+        /// </summary>
+        public static bool GetFixedConflict(IntPtr ctx, out uint firstId, out uint secondId, out byte regType, out short reg)
+        {
+            firstId = 0; secondId = 0; regType = 0; reg = -1;
+            if (ctx == IntPtr.Zero || _getFixedConflict == null) return false;
+            fixed (uint* pFirst = &firstId)
+            fixed (uint* pSecond = &secondId)
+            fixed (byte* pType = &regType)
+            fixed (short* pReg = &reg)
+            {
+                return _getFixedConflict(ctx, pFirst, pSecond, pType, pReg) == 1;
             }
         }
 

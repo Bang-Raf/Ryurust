@@ -81,7 +81,7 @@ pub unsafe extern "C" fn ryu_regalloc_add_interval(
 /// Runs the allocation pass. Returns the number of intervals that got a register, `0` for a
 /// null context, or `usize::MAX` ([`RUN_PASS_FIXED_CONFLICT`](crate::RUN_PASS_FIXED_CONFLICT),
 /// `-1` when read as a signed integer) if two overlapping fixed intervals demand the same
-/// register. In that case nothing was allocated (every result has register `-1` and spill
+/// register or a fixed interval names a register outside `0..32`. In that case nothing was allocated (every result has register `-1` and spill
 /// offset `-1`) and `ryu_regalloc_get_fixed_conflict` names the offending pair.
 ///
 /// # Safety
@@ -109,7 +109,8 @@ pub unsafe extern "C" fn ryu_regalloc_run_pass(
 /// Reports the fixed-register conflict that made the last `ryu_regalloc_run_pass` on `ctx`
 /// fail. Returns `1` and fills the non-null outputs (ids of the two intervals in start
 /// order, their register class and the register both are fixed to) if there was one, `0`
-/// otherwise (including a null context).
+/// otherwise (including a null context). Both ids are the same interval's when it names a
+/// register outside `0..32`.
 ///
 /// # Safety
 /// `ctx` must be null or a live handle from `ryu_regalloc_create`. Each output pointer must be

@@ -13,6 +13,12 @@ pub const NVDEC_STATUS_INVALID_ARGUMENT: i32 = -2;
 pub const NVDEC_STATUS_BUFFER_TOO_SMALL: i32 = -3;
 pub const NVDEC_STATUS_CORRUPT_BITSTREAM: i32 = -4;
 
+/// `a * b` as a slice length: `None` if it overflows or exceeds `isize::MAX`
+/// (the limit for `slice::from_raw_parts`).
+fn plane_len(a: usize, b: usize) -> Option<usize> {
+    a.checked_mul(b).filter(|&n| n <= isize::MAX as usize)
+}
+
 pub const RYU_VIDEO_NVDEC_VERSION: u32 = 0x0001_0000; // v1.0.0
 
 /// Kept for compatibility with existing callers; same value as `ryu_video_nvdec_version`.
@@ -44,7 +50,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct4x4_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 16);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 4);
+    let Some(dest_len) = plane_len(stride, 4) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     idct4x4_add(input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -67,7 +76,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct8x8_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 64);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 8);
+    let Some(dest_len) = plane_len(stride, 8) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     idct8x8_add(input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -90,7 +102,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct16x16_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 256);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 16);
+    let Some(dest_len) = plane_len(stride, 16) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     idct16x16_add(input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -113,7 +128,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_idct32x32_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 1024);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 32);
+    let Some(dest_len) = plane_len(stride, 32) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     idct32x32_add(input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -137,7 +155,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht4x4_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 16);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 4);
+    let Some(dest_len) = plane_len(stride, 4) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     iht4x4_add(tx_type, input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -161,7 +182,10 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_iht8x8_add(
     }
 
     let input_slice = std::slice::from_raw_parts(input, 64);
-    let dest_slice = std::slice::from_raw_parts_mut(dest, stride * 8);
+    let Some(dest_len) = plane_len(stride, 8) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    let dest_slice = std::slice::from_raw_parts_mut(dest, dest_len);
     iht8x8_add(tx_type, input_slice, dest_slice, stride, eob);
     NVDEC_STATUS_OK
 }
@@ -226,10 +250,13 @@ pub unsafe extern "C" fn ryu_nvdec_vp9_loop_filter_frame(
     if width < 8 || height < 8 || y_stride < width || uv_stride < width / 2 {
         return NVDEC_STATUS_INVALID_ARGUMENT;
     }
-    if y_len < height * y_stride
-        || u_len < height.div_ceil(2) * uv_stride
-        || v_len < height.div_ceil(2) * uv_stride
-    {
+    let (Some(y_need), Some(uv_need)) = (
+        plane_len(height, y_stride),
+        plane_len(height.div_ceil(2), uv_stride),
+    ) else {
+        return NVDEC_STATUS_INVALID_ARGUMENT;
+    };
+    if y_len < y_need || u_len < uv_need || v_len < uv_need {
         return NVDEC_STATUS_BUFFER_TOO_SMALL;
     }
 
@@ -363,6 +390,50 @@ mod tests {
                     4
                 ),
                 E
+            );
+        }
+    }
+
+    #[test]
+    fn overflowing_plane_sizes_are_rejected() {
+        let coeffs = [0i32; 1024];
+        let mut buf = [0u8; 64];
+        let huge = usize::MAX / 2;
+        let cfg = Vp9FrameConfig {
+            width: 16,
+            height: 16,
+            is_key_frame: 1,
+            intra_only: 0,
+            filter_level: 0,
+            sharpness: 0,
+            base_qindex: 0,
+            transform_mode: 0,
+            lossless: 0,
+        };
+        let bits = [0u8; 4];
+        // SAFETY: every call is rejected before any pointer is turned into a slice.
+        unsafe {
+            let d = buf.as_mut_ptr();
+            assert_eq!(
+                ryu_nvdec_vp9_idct4x4_add(coeffs.as_ptr(), d, huge, 1),
+                NVDEC_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                ryu_nvdec_vp9_idct32x32_add(coeffs.as_ptr(), d, huge, 1),
+                NVDEC_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                ryu_nvdec_vp9_loop_filter_frame(d, 64, d, 64, d, 64, 8, huge, 8, 4, 1, 0),
+                NVDEC_STATUS_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                ryu_nvdec_decode_vp9_frame(bits.as_ptr(), 4, &cfg, d, 64, d, 64, d, 64, huge, huge),
+                NVDEC_STATUS_INVALID_ARGUMENT
+            );
+            // Stride narrower than the frame: rows would overlap.
+            assert_eq!(
+                ryu_nvdec_decode_vp9_frame(bits.as_ptr(), 4, &cfg, d, 64, d, 64, d, 64, 8, 8),
+                NVDEC_STATUS_INVALID_ARGUMENT
             );
         }
     }

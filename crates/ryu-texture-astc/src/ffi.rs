@@ -28,7 +28,7 @@ pub extern "C" fn ryu_astc_query_decompressed_size(
 }
 
 /// Decodes one block. Returns `0` on success, `1` for an illegal or unsupported block
-/// (the texels are then opaque magenta), `-1` for null pointers or bad block sizes.
+/// (the texels are then zero, as in C#), `-1` for null pointers or bad block sizes.
 /// Block sizes above 12x12 are rejected with `-1`, as C# rejects them with an exception.
 ///
 /// # Safety
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn ryu_astc_decompress_block(
 /// Returns:
 /// * `0`: every block decoded (C# `TryDecodeToRgba8` returns `true`).
 /// * `1`: the output was fully written but at least one block was illegal or
-///   unsupported and was written as opaque magenta (C# returns `false`); also returned,
+///   unsupported and was written as zeros (C# returns `false`); also returned,
 ///   with nothing written, when `input_len` / `output_len` are too small for the texture.
 /// * `-1`: a null pointer. `-2`: a non-positive dimension, level or layer count.
 ///

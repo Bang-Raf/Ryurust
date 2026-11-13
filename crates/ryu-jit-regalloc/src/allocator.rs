@@ -120,10 +120,12 @@ impl LinearScanEngine {
     /// # Errors
     ///
     /// If two non-empty fixed intervals of the same register class and the same `fixed_reg`
-    /// (in `0..32`) overlap, the input is unsatisfiable. The pass then allocates nothing:
+    /// overlap, or a fixed interval's `fixed_reg` is outside `0..32` (the register masks
+    /// are 32 bits wide), the input is unsatisfiable. The pass then allocates nothing:
     /// the intervals are left sorted, every `assigned_reg` and `spill_offset` is set to
     /// `-1`, and the first such pair (in start order) is returned and kept for
-    /// [`fixed_conflict`](Self::fixed_conflict).
+    /// [`fixed_conflict`](Self::fixed_conflict). An out-of-range register is reported first,
+    /// as a "pair" of that one interval (`first_id == second_id`).
     pub fn try_run_pass(
         &mut self,
         masks: RegisterMasksNative,
@@ -172,6 +174,26 @@ impl LinearScanEngine {
                     j = k;
                 }
             }
+        }
+
+        // A fixed interval must name a register the 32-bit masks can describe.
+        if let Some(bad) = self
+            .intervals
+            .iter()
+            .find(|iv| iv.is_fixed && !(0..32).contains(&iv.fixed_reg))
+        {
+            let err = FixedRegisterConflict {
+                first_id: bad.id,
+                second_id: bad.id,
+                reg_type: bad.reg_type,
+                reg: bad.fixed_reg,
+            };
+            for iv in &mut self.intervals {
+                iv.assigned_reg = -1;
+                iv.spill_offset = -1;
+            }
+            self.last_conflict = Some(err);
+            return Err(err);
         }
 
         let reg_count = (masks.registers_count as usize).min(MAX_REGISTERS);

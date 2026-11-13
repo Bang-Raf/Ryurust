@@ -20,7 +20,7 @@ when a library isn't present.
 | | |
 | :--- | :--- |
 | Crates | 32 |
-| Tests | 369, all passing (`cargo test --workspace`), plus golden tests against C# ASTC output and a LibHac-built RomFS image |
+| Tests | 374, all passing (`cargo test --workspace`), plus golden tests against C# ASTC output and a LibHac-built RomFS image |
 | Benchmarks | 121 Criterion benchmarks, one suite per crate ([results](docs/BENCHMARKS.md)) |
 | Wired into Ryubing | 13 crates have C# wrappers; 10 of those are called from emulator code |
 | Platforms | Built and tested on x86_64 Linux. AVX2 paths are chosen at runtime with scalar fallbacks. |

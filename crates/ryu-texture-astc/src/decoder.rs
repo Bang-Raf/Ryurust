@@ -849,15 +849,16 @@ fn decode_color_values(
     true
 }
 
-/// ASTC error colour (opaque magenta) as packed RGBA8, written for illegal blocks.
-pub const ASTC_ERROR_COLOR: u32 = 0xFFFF_00FF;
+/// Packed RGBA8 value written to every texel of an illegal or unsupported block: zero
+/// (transparent black), which is what Ryujinx's C# `AstcDecoder` leaves there. Versions
+/// up to 0.1.1 wrote the ASTC specification's error colour, opaque magenta, instead.
+pub const ASTC_ERROR_COLOR: u32 = 0;
 
 /// Decompresses one 16-byte ASTC block into `output_buffer` (RGBA8 packed as `u32`).
 ///
 /// Returns `false` for illegal or unsupported blocks; in that case the first
-/// `block_width * block_height` texels of `output_buffer` are filled with the ASTC
-/// error colour ([`ASTC_ERROR_COLOR`], opaque magenta) as the ASTC specification
-/// requires. Never panics for any 16-byte input, provided `output_buffer` holds at
+/// `block_width * block_height` texels of `output_buffer` are filled with
+/// [`ASTC_ERROR_COLOR`] (zero, as in C#). Never panics for any 16-byte input, provided `output_buffer` holds at
 /// least `block_width * block_height` texels.
 pub fn decompress_block(
     input_block: &[u8; 16],
@@ -1220,9 +1221,9 @@ fn bytemuck_cast_u32_slice(slice: &[u32]) -> &[u8] {
 /// Decodes a whole ASTC texture (all levels and layers) to RGBA8.
 ///
 /// Mirrors the C# `AstcDecoder.TryDecodeToRgba8`: every block is decoded and written,
-/// and the result is `false` if any block was illegal or unsupported. Unlike the C#
-/// decoder, which leaves such blocks zeroed, illegal blocks are written as the ASTC
-/// error colour ([`ASTC_ERROR_COLOR`], opaque magenta).
+/// and the result is `false` if any block was illegal or unsupported. Such blocks are
+/// written as zeros ([`ASTC_ERROR_COLOR`]), as in C#, so the output matches C# byte for
+/// byte.
 ///
 /// Also returns `false`, without decoding anything, when `data` holds fewer blocks
 /// than the texture needs or `output` is shorter than [`query_decompressed_size`].

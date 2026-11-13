@@ -20,12 +20,9 @@ the PR title.
 
 | Crate | Problem |
 | :--- | :--- |
-| `ryu-texture-astc` | Invalid blocks are written as opaque magenta; C# leaves those texels as zeros. The status code is the same (failure), so only the texel values differ. Deliberate, but a C# caller that switches to the native decoder will see magenta instead of black. |
-| `ryu-jit-regalloc` | Spill choice uses the furthest interval end (Poletto/Sarkar), not C#'s next-use position plus interval splitting: this crate's intervals carry no use lists and are never split. Fixed intervals with `fixed_reg` outside `0..32` are not tracked (the register masks are `u32`), so conflicts between them go undetected. |
+| `ryu-jit-regalloc` | Spill choice uses the furthest interval end (Poletto/Sarkar), not C#'s next-use position plus interval splitting: this crate's intervals carry no use lists and are never split. |
 | `ryu-texture-astc` | Matching C# made decoding slower: about 3–8% per valid block, and 12–35% per invalid block, because blocks that used to be rejected early now go through the same steps as in C#. Real textures are almost all valid blocks; the Criterion benchmark uses random blocks (~94% invalid), so its numbers overstate the cost. See [BENCHMARKS.md](BENCHMARKS.md). |
 | `ryu-interval-tree` | At n = 128 the balanced tree is no faster than the old sorted array, and the slice query may be 5–15% slower (within benchmark noise). From a few hundred entries up it is clearly faster. |
-| `ryu-video-nvdec` | `stride * n` / `height * y_stride` aren't overflow-checked. A wrapped product gives a too-short slice and a panic (the process aborts at the C boundary), not memory corruption. |
-| `ryu-memory-pagetable` | `map_range` / `unmap_range` with a `size` near `u64::MAX` loop over that many pages. No overflow, but effectively a hang; callers must pass real sizes. |
 | `ryu-romfs-indexer` | **Only used with RomFS mods.** A game reads its own RomFS from the raw image (`OpenDataStorageByCurrentProcess`), so the emulator never looks up paths in it during play. The one place Ryubing does is `ModLoader.ApplyRomFsMods`, which locates every base-game file once when building a modded RomFS; that now uses the native index. Without RomFS mods the crate is not used. |
 
 ### Code-quality debt
@@ -37,11 +34,6 @@ the PR title.
 - The wrappers log once whether their library loaded (see "Since v0.1.1"),
   but not how often the native path is taken afterwards: several call sites
   fall back to C# per call (for example on small inputs).
-- `NativeSurfaceFlingerQueue.ParseHeader` is called on every parcel but its
-  result is discarded; the C# parser still does the work.
-- `NativeJitRegalloc.cs` has no binding for the new
-  `ryu_regalloc_get_fixed_conflict` export (nothing in Ryubing calls the
-  allocator part of the wrapper yet).
 
 ## Gameplay testing
 
@@ -129,6 +121,16 @@ Limits of this test:
   with the reason the index wasn't built.
 - The per-process index that v0.1.1 built at game load (and never queried)
   is removed, so loading a game no longer copies the RomFS tables.
+
+Fixed, with regression tests:
+
+| Crate | Fix |
+| :--- | :--- |
+| `ryu-video-nvdec` | Plane and block sizes (`stride * n`, `height * y_stride`) are checked for overflow and for the `isize::MAX` slice limit; an overflowing size returns `-2` (invalid argument) instead of building a too-short slice and panicking. `ryu_nvdec_decode_vp9_frame` also rejects a stride narrower than the frame, which made rows overlap and could index past the plane. |
+| `ryu-memory-pagetable` | `unmap_range` skips subtrees with nothing mapped, so its cost follows what is mapped rather than `size`: `unmap_range(0, u64::MAX)` used to loop over 2^52 pages and now returns at once. Both range functions are clipped to the 48-bit address space; a range running past the top used to wrap round and map or unmap low pages. `map_range` still writes one entry per page. |
+| `ryu-texture-astc` | Illegal blocks are written as zeros, as the C# decoder leaves them, instead of opaque magenta. `ASTC_ERROR_COLOR` is now `0`. The golden tests now require every output byte to match C#. |
+| `ryu-jit-regalloc` | A fixed interval whose `fixed_reg` is outside `0..32` (the register masks are 32 bits) used to be given that number unchecked. It is now rejected like an overlap: `run_pass` returns `RUN_PASS_FIXED_CONFLICT` and the conflict names that interval twice (`first_id == second_id`). `NativeJitRegAlloc.cs` gains `GetFixedConflict`, the binding for `ryu_regalloc_get_fixed_conflict`. |
+| integration | `Parcel` no longer calls `NativeSurfaceFlingerQueue.ParseHeader`, whose result was discarded. The SurfaceFlinger queue is still used: dequeue picks its free slot through `FindFreeSlot`. |
 
 ## Fixed in v0.1.1
 

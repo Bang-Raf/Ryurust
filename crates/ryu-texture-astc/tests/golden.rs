@@ -2,14 +2,13 @@
 //!
 //! Every fixture holds ASTC input blocks, the C# per-block verdict, the C# image-level
 //! status and the C# RGBA8 output. The Rust decoder must reproduce the status, every
-//! per-block verdict and every output byte. The one intentional difference: the C#
-//! decoder leaves a failed block's texels zeroed, while this crate writes the ASTC error
-//! colour (opaque magenta) there. The test checks both halves of that exactly.
+//! per-block verdict and every output byte, including the zeros C# leaves in the texels
+//! of a failed block.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ryu_texture_astc::{decode_astc_to_rgba8, decompress_block, ASTC_ERROR_COLOR};
+use ryu_texture_astc::{decode_astc_to_rgba8, decompress_block};
 
 #[cfg(feature = "parallel")]
 use ryu_texture_astc::decode_astc_to_rgba8_parallel;
@@ -122,24 +121,8 @@ fn check(f: &Fixture) -> Vec<String> {
     let (bw, bh) = (f.block_width, f.block_height);
     let blocks = f.block_ok.len();
 
-    // Expected Rust output: the C# output, with each failed block's texels (which the
-    // C# decoder leaves zeroed) replaced by the error colour.
-    let mut expected = f.output.clone();
-    for (i, &ok) in f.block_ok.iter().enumerate() {
-        if ok {
-            continue;
-        }
-        for row in block_output_rows(f, i) {
-            if f.output[row.clone()].iter().any(|&b| b != 0) {
-                problems.push(format!(
-                    "{}: block {i}: C# output of a failed block is not zero",
-                    f.name
-                ));
-            }
-            let (texels, _) = expected[row].as_chunks_mut::<4>();
-            texels.fill(ASTC_ERROR_COLOR.to_le_bytes());
-        }
-    }
+    // Expected Rust output: exactly the C# output.
+    let expected = f.output.clone();
 
     // Per-block verdict.
     let mut scratch = [0u32; 144];

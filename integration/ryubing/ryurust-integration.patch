@@ -16,10 +16,10 @@ index 94883b39b05d32385756686c09d4ba93a376748e..93dc5606d29bb48f7184ed051b035088
              int selected = 0;
 diff --git a/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs b/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs
 new file mode 100644
-index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8e122c674
+index 0000000000000000000000000000000000000000..0c2eb4057d786da3df44039ca15067360028e173
 --- /dev/null
 +++ b/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,227 @@
 +using Ryujinx.Common.Logging;
 +using System;
 +using System.Collections.Generic;
@@ -40,6 +40,7 @@ index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8
 +        private delegate uint AddIntervalFn(IntPtr ctx, uint id, int start, int end, byte regType, byte isFixed, short fixedReg);
 +        private delegate nuint RunPassFn(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount);
 +        private delegate int GetResultFn(IntPtr ctx, nuint index, uint* outId, short* outReg, int* outSpill);
++        private delegate int GetFixedConflictFn(IntPtr ctx, uint* outFirstId, uint* outSecondId, byte* outRegType, short* outReg);
 +        private delegate int GetHighestIndexFn(int* span, nuint len);
 +        private delegate uint BitsetOrFn(ulong* dst, ulong* src, nuint count);
 +        private delegate uint BitsetAndNotFn(ulong* dst, ulong* src, nuint count);
@@ -51,6 +52,7 @@ index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8
 +        private static readonly AddIntervalFn _addInterval;
 +        private static readonly RunPassFn _runPass;
 +        private static readonly GetResultFn _getResult;
++        private static readonly GetFixedConflictFn _getFixedConflict;
 +        private static readonly GetHighestIndexFn _getHighestIndex;
 +        private static readonly BitsetOrFn _bitsetOr;
 +        private static readonly BitsetAndNotFn _bitsetAndNot;
@@ -76,6 +78,7 @@ index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8
 +                    _addInterval = GetExport<AddIntervalFn>(handle, "ryu_regalloc_add_interval");
 +                    _runPass = GetExport<RunPassFn>(handle, "ryu_regalloc_run_pass");
 +                    _getResult = GetExport<GetResultFn>(handle, "ryu_regalloc_get_result");
++                    _getFixedConflict = GetExport<GetFixedConflictFn>(handle, "ryu_regalloc_get_fixed_conflict");
 +                    _getHighestIndex = GetExport<GetHighestIndexFn>(handle, "ryu_regalloc_get_highest_index");
 +                    _bitsetOr = GetExport<BitsetOrFn>(handle, "ryu_regalloc_bitset_or");
 +                    _bitsetAndNot = GetExport<BitsetAndNotFn>(handle, "ryu_regalloc_bitset_and_not");
@@ -172,6 +175,12 @@ index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8
 +                : 0;
 +        }
 +
++        /// <summary>
++        /// Runs the allocation pass. Returns the number of intervals that got a register, or
++        /// -1 if the fixed intervals can't be satisfied (two overlapping intervals fixed to one
++        /// register, or a fixed register outside 0..32); <see cref="GetFixedConflict"/> then
++        /// says which.
++        /// </summary>
 +        public static int RunPass(IntPtr ctx, uint intAvail, uint vecAvail, uint regCount)
 +        {
 +            return ctx != IntPtr.Zero && _runPass != null
@@ -188,6 +197,25 @@ index 0000000000000000000000000000000000000000..541fa091c3b9e713713eceacd28e17a8
 +            fixed (int* pSpill = &spillOffset)
 +            {
 +                return _getResult(ctx, (nuint)index, pId, pReg, pSpill) == 1;
++            }
++        }
++
++        /// <summary>
++        /// After <see cref="RunPass"/> returned -1: the two conflicting fixed intervals (in start
++        /// order), their register class and register. <paramref name="firstId"/> equals
++        /// <paramref name="secondId"/> when one interval names a register outside 0..32.
++        /// Returns false if the last pass had no conflict or the export is missing.
++        /// </summary>
++        public static bool GetFixedConflict(IntPtr ctx, out uint firstId, out uint secondId, out byte regType, out short reg)
++        {
++            firstId = 0; secondId = 0; regType = 0; reg = -1;
++            if (ctx == IntPtr.Zero || _getFixedConflict == null) return false;
++            fixed (uint* pFirst = &firstId)
++            fixed (uint* pSecond = &secondId)
++            fixed (byte* pType = &regType)
++            fixed (short* pReg = &reg)
++            {
++                return _getFixedConflict(ctx, pFirst, pSecond, pType, pReg) == 1;
 +            }
 +        }
 +
@@ -4049,21 +4077,6 @@ index 0000000000000000000000000000000000000000..4cae426b101d968a537c6f9dd0badb90
 +        }
 +    }
 +}
-diff --git a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
-index 25c89baece1b4c58863b21632af47dade8e31634..c810b0d121b8148404b36fde7aa5263976759426 100644
---- a/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
-+++ b/src/Ryujinx.HLE/HOS/Services/SurfaceFlinger/Parcel.cs
-@@ -29,6 +29,10 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
- 
-         public Parcel(ReadOnlySpan<byte> data)
-         {
-+            if (NativeSurfaceFlingerQueue.IsAvailable && data.Length >= 16)
-+            {
-+                NativeSurfaceFlingerQueue.ParseHeader(data, out _);
-+            }
-             _rawDataOwner = MemoryOwner<byte>.RentCopy(data);
- 
-             _payloadPosition = 0;
 diff --git a/src/Ryujinx.Input/Motion/MotionInput.cs b/src/Ryujinx.Input/Motion/MotionInput.cs
 index 9d781c58a77537eb65d08849ff4c5f87942ab109..e32b3081de2e8a6d5002960a21ea73e654c5f378 100644
 --- a/src/Ryujinx.Input/Motion/MotionInput.cs

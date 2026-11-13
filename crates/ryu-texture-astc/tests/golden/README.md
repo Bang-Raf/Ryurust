@@ -57,13 +57,13 @@ A throwaway .NET 10 console program referenced
 | 48 + 16*n* | *n* bytes: C# per-block verdict (1 = decoded, 0 = threw) |
 | 48 + 17*n* | *m* bytes: C# RGBA8 output |
 
-## The one intended difference
+## Failed blocks
 
 The C# decoder leaves a failed block's texels zero (its per-block scratch buffer is
-zero-initialised and the exception fires before any texel is written). This crate writes
-the ASTC error colour, opaque magenta, there. `golden.rs` asserts both: the C# bytes of
-every failed block are zero, and the Rust bytes are magenta. Every other byte, every
-per-block verdict and the image-level status must match exactly.
+zero-initialised and the exception fires before any texel is written). Since v0.1.2 this
+crate writes zeros there too (up to v0.1.1 it wrote the ASTC error colour, opaque
+magenta), so `golden.rs` requires every output byte, every per-block verdict and the
+image-level status to match exactly.
 
 The generator's source is kept next to the fixtures as `generator.cs.txt`
 (`Program.cs`) and `generator.csproj.txt` (its project file; point the

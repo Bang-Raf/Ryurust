@@ -104,18 +104,27 @@ impl Vp9DecoderPipeline {
         let width = config.width as usize;
         let height = config.height as usize;
 
-        if y_out.len() < height * y_stride {
-            return Err(-3); // Buffer too small
+        if y_stride < width || uv_stride < width / 2 {
+            return Err(-2); // Invalid argument: rows would overlap
         }
         let uv_height = height.div_ceil(2);
-        if u_out.len() < uv_height * uv_stride || v_out.len() < uv_height * uv_stride {
+        let (Some(y_need), Some(uv_need)) = (
+            height.checked_mul(y_stride),
+            uv_height.checked_mul(uv_stride),
+        ) else {
+            return Err(-2); // Invalid argument: plane size overflows
+        };
+        if y_out.len() < y_need {
+            return Err(-3); // Buffer too small
+        }
+        if u_out.len() < uv_need || v_out.len() < uv_need {
             return Err(-3);
         }
 
         // Initialize with default mid-grey base prediction (Y=128, U=128, V=128)
-        y_out[..height * y_stride].fill(128);
-        u_out[..uv_height * uv_stride].fill(128);
-        v_out[..uv_height * uv_stride].fill(128);
+        y_out[..y_need].fill(128);
+        u_out[..uv_need].fill(128);
+        v_out[..uv_need].fill(128);
 
         // Parse macroblock stream with boolean entropy decoder
         let mut reader = BoolDecoder::new(bitstream);

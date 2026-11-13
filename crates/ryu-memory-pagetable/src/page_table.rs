@@ -8,6 +8,9 @@ pub const LEVEL_BITS: usize = 9;
 pub const LEVEL_SIZE: usize = 1 << LEVEL_BITS;
 pub const LEVEL_MASK: u64 = (LEVEL_SIZE as u64) - 1;
 
+/// One past the highest page index the four levels can address (2^36 pages = 48-bit VA).
+pub const PAGE_INDEX_LIMIT: u64 = 1 << (LEVEL_BITS * 4);
+
 pub struct L3Node {
     pub entries: [u64; LEVEL_SIZE],
 }
@@ -158,15 +161,30 @@ impl Radix48PageTable {
     }
 
     /// Pages covered by `size` bytes, rounded up. Doesn't overflow for `size` near
-    /// `u64::MAX`; addresses past the end wrap, as they always did in release builds.
+    /// `u64::MAX`.
     #[inline]
     fn page_count(size: u64) -> u64 {
         size / (PAGE_SIZE as u64) + u64::from(size & PAGE_MASK != 0)
     }
 
+    /// The pages `[first, end)` a range starting at `va` covers, clipped to the 48-bit
+    /// address space the table indexes. `end <= first` (empty) if `va` is outside it.
+    #[inline]
+    fn page_span(va: u64, size: u64) -> (u64, u64) {
+        let first = va >> PAGE_BITS;
+        let end = first
+            .saturating_add(Self::page_count(size))
+            .min(PAGE_INDEX_LIMIT);
+        (first, end)
+    }
+
+    /// Maps every page of the range. The range is clipped to the 48-bit address space
+    /// (it used to wrap round to low addresses); each page still gets its own entry, so
+    /// a range of terabytes allocates accordingly.
     pub fn map_range(&mut self, va: u64, size: u64, host_ptr_base: u64) {
-        for i in 0..Self::page_count(size) {
-            let offset = i.wrapping_mul(PAGE_SIZE as u64);
+        let (first, end) = Self::page_span(va, size);
+        for i in 0..end.saturating_sub(first) {
+            let offset = i << PAGE_BITS;
             self.map(va.wrapping_add(offset), host_ptr_base.wrapping_add(offset));
         }
     }
@@ -222,9 +240,42 @@ impl Radix48PageTable {
         }
     }
 
+    /// Unmaps every page of the range, clipped to the 48-bit address space. Subtrees
+    /// with nothing mapped are skipped whole, so the cost follows what is mapped rather
+    /// than `size`.
     pub fn unmap_range(&mut self, va: u64, size: u64) {
-        for i in 0..Self::page_count(size) {
-            self.unmap(va.wrapping_add(i.wrapping_mul(PAGE_SIZE as u64)));
+        let (mut page, end) = Self::page_span(va, size);
+        let offset_in_page = va & PAGE_MASK;
+
+        while page < end {
+            let l2_idx = ((page >> LEVEL_BITS) & LEVEL_MASK) as usize;
+            let l1_idx = ((page >> (LEVEL_BITS * 2)) & LEVEL_MASK) as usize;
+            let l0_idx = ((page >> (LEVEL_BITS * 3)) & LEVEL_MASK) as usize;
+
+            // Pages covered by one L1, L2 and L3 node; jump to the next node boundary
+            // when a level is missing.
+            let skip_to = |span_bits: usize| ((page >> span_bits) + 1) << span_bits;
+
+            let l1 = self.l0[l0_idx];
+            if l1.is_null() {
+                page = skip_to(LEVEL_BITS * 3);
+                continue;
+            }
+            // SAFETY: `l1` is a non-null node owned by this table, read only here.
+            let l2 = unsafe { (*l1).entries[l1_idx] };
+            if l2.is_null() {
+                page = skip_to(LEVEL_BITS * 2);
+                continue;
+            }
+            // SAFETY: `l2` is a non-null node owned by this table, read only here.
+            let l3 = unsafe { (*l2).entries[l2_idx] };
+            if l3.is_null() {
+                page = skip_to(LEVEL_BITS);
+                continue;
+            }
+
+            self.unmap((page << PAGE_BITS) | offset_in_page);
+            page += 1;
         }
     }
 }

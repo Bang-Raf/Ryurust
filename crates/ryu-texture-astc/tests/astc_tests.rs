@@ -172,12 +172,13 @@ fn test_dual_sequential_and_parallel_consistency() {
 }
 
 #[test]
-fn test_invalid_block_yields_error_colour() {
-    let mut out_pixels = [0u32; 16];
+fn test_invalid_block_yields_zero_texels() {
+    // Start from non-zero texels so the zeros must have been written by the decoder.
+    let mut out_pixels = [0xDEAD_BEEFu32; 16];
     assert!(!decompress_block(&[0u8; 16], &mut out_pixels, 4, 4));
     assert!(out_pixels.iter().all(|&p| p == ASTC_ERROR_COLOR));
-    // Opaque magenta: R = 0xFF, G = 0x00, B = 0xFF, A = 0xFF.
-    assert_eq!(ASTC_ERROR_COLOR.to_le_bytes(), [0xFF, 0x00, 0xFF, 0xFF]);
+    // Zero, as Ryujinx's C# decoder leaves a failed block.
+    assert_eq!(ASTC_ERROR_COLOR, 0);
 }
 
 /// Regression: this block's colour integer sequence decodes to more values than the
@@ -188,7 +189,7 @@ fn test_oversized_color_sequence_does_not_panic() {
         0x0f, 0xbb, 0x16, 0x3c, 0x20, 0x3a, 0x7a, 0x94, 0x71, 0x75, 0xfd, 0x56, 0x96, 0x97, 0xbe,
         0x4f,
     ];
-    let mut out_pixels = [0u32; 16];
+    let mut out_pixels = [0xDEAD_BEEFu32; 16];
     let ok = decompress_block(&block, &mut out_pixels, 4, 4);
     assert!(!ok, "oversized colour encoding must be rejected");
     assert!(out_pixels.iter().all(|&p| p == ASTC_ERROR_COLOR));
@@ -312,21 +313,22 @@ fn test_all_valid_blocks_report_success() {
 }
 
 #[test]
-fn test_invalid_block_reports_failure_and_is_magenta() {
+fn test_invalid_block_reports_failure_and_is_zero() {
     let mut input = four_block_texture();
     // Block 2 (bottom-left): all zeros is a reserved block mode.
     input[2 * 16..3 * 16].fill(0);
-    let magenta = ASTC_ERROR_COLOR.to_le_bytes();
+    let zero = ASTC_ERROR_COLOR.to_le_bytes();
 
     for (decode, ffi_decode) in image_decoders() {
-        let mut out = vec![0u8; 8 * 8 * 4];
+        // Non-zero start, so the failed block's zeros must come from the decoder.
+        let mut out = vec![0xABu8; 8 * 8 * 4];
         assert!(!decode(&input, &mut out, 4, 4, 8, 8, 1, 1, 1));
 
         for y in 0..8 {
             for x in 0..8 {
                 let block = (y / 4) * 2 + x / 4;
                 let expected = if block == 2 {
-                    magenta
+                    zero
                 } else {
                     [0x10 * (block as u8 + 1), 0x20, 0x30, 0xFF]
                 };
@@ -334,7 +336,7 @@ fn test_invalid_block_reports_failure_and_is_magenta() {
             }
         }
 
-        let mut ffi_out = vec![0u8; out.len()];
+        let mut ffi_out = vec![0xABu8; out.len()];
         let status = unsafe {
             ffi_decode(
                 input.as_ptr(),
