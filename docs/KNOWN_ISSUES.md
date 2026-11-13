@@ -26,6 +26,7 @@ the PR title.
 | `ryu-interval-tree` | At n = 128 the balanced tree is no faster than the old sorted array, and the slice query may be 5–15% slower (within benchmark noise). From a few hundred entries up it is clearly faster. |
 | `ryu-video-nvdec` | `stride * n` / `height * y_stride` aren't overflow-checked. A wrapped product gives a too-short slice and a panic (the process aborts at the C boundary), not memory corruption. |
 | `ryu-memory-pagetable` | `map_range` / `unmap_range` with a `size` near `u64::MAX` loop over that many pages. No overflow, but effectively a hang; callers must pass real sizes. |
+| `ryu-romfs-indexer` | **Built but never queried.** Since v0.1.1 Ryubing builds a native index when a game's RomFS is set up, but nothing calls `VirtualFileSystem.TryGetRomFsFileInfo`, the only method that queries it. Game RomFS reads go through LibHac's `RomFsFileSystem` as upstream. Earlier docs listed RomFS lookup as one of ten subsystems the emulator calls; that was wrong. Routing lookups through the index would mean wrapping LibHac's RomFS file system. |
 
 ### Code-quality debt
 
@@ -33,8 +34,11 @@ the PR title.
   aren't in their own blocks, so they're covered by the function's
   `# Safety` doc rather than a per-operation `// SAFETY:` comment. Moving to
   edition 2024 (`unsafe_op_in_unsafe_fn`) would make that explicit.
-- The C# wrappers don't log whether a native library was loaded, so a log
-  can't show whether the Rust path or the C# fallback ran.
+- The wrappers log once whether their library loaded (see "Since v0.1.1"),
+  but not how often the native path is taken afterwards: several call sites
+  fall back to C# per call (for example on small inputs).
+- `NativeSurfaceFlingerQueue.ParseHeader` is called on every parcel but its
+  result is discarded; the C# parser still does the work.
 - `NativeJitRegalloc.cs` has no binding for the new
   `ryu_regalloc_get_fixed_conflict` export (nothing in Ryubing calls the
   allocator part of the wrapper yet).
@@ -67,11 +71,10 @@ What the log showed:
   30 times a second (about 20,000 lines in 6 minutes). This is upstream
   Ryubing's stub for the online account service, which Ryurust doesn't touch.
 
-Limits: this is the first build in which the native RomFS index can be
-created, and both games loaded and streamed RomFS data without file-system
-errors. But the C# wrappers still don't log which path ran (see "Code-quality
-debt"), so the log can't show whether the Rust index or the C# fallback
-served those lookups. No frame-rate measurements were taken.
+Limits: this build doesn't log which wrappers loaded their library. Found
+afterwards: the native RomFS index is built but no lookup uses it (see
+"Correctness gaps"), so these sessions don't test it. No frame-rate
+measurements were taken.
 
 ### v0.1.0 (2026-11-11)
 
@@ -100,12 +103,24 @@ Limits of this test:
   measurements were taken, and there is no comparison against a build without
   Ryurust.
 - The C# wrappers don't log whether a native library was loaded, so the logs
-  don't prove that the ten wired subsystems ran the Rust code rather than the
+  don't prove that the wired subsystems ran the Rust code rather than the
   C# fallback. The libraries were present in `lib/`, one of the paths the
   wrappers probe.
 - Found afterwards: in this build the native RomFS index could never be
   created (see "Fixed in v0.1.1"), so RomFS lookups in these sessions all
   used the C# path.
+
+## Since v0.1.1 (unreleased)
+
+- Each C# wrapper logs one line the first time it is used (at `Application`
+  level): `Ryurust: using native <library> <version> from <path>`, or
+  `<library> not found, using the C# implementation` (Info), or
+  `<library> found at <path> but not usable (<reason>)` (Warning, with the
+  exception message or the missing exports). A wrapper that a game never
+  touches logs nothing.
+- `VirtualFileSystem` logs whether the native RomFS index was built for each
+  process (`Loader` level), with file and directory counts or the reason it
+  wasn't.
 
 ## Fixed in v0.1.1
 

@@ -1,4 +1,6 @@
+using Ryujinx.Common.Logging;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -101,6 +103,9 @@ namespace Ryujinx.HLE.HOS.Ipc
         private static readonly GetBufferFn _getBuffer0x22;
 
         private static readonly bool _isAvailable;
+        private static string _loadedFrom;
+        private static string _loadFailure;
+        private static readonly List<string> _missingExports = [];
 
         public static bool IsAvailable => _isAvailable;
 
@@ -121,10 +126,13 @@ namespace Ryujinx.HLE.HOS.Ipc
                     _isAvailable = _version != null && _parse != null && _version() >= 0x00010000;
                 }
             }
-            catch
+            catch (Exception e)
             {
                 _isAvailable = false;
+                _loadFailure = e.Message;
             }
+
+            LogLoadResult();
         }
 
         private static IntPtr LoadNativeLibrary()
@@ -146,12 +154,14 @@ namespace Ryujinx.HLE.HOS.Ipc
             {
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
                 {
+                    _loadedFrom = path;
                     return h;
                 }
             }
 
             if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
             {
+                _loadedFrom = $"{LibraryName} (system library path)";
                 return defaultHandle;
             }
 
@@ -164,7 +174,28 @@ namespace Ryujinx.HLE.HOS.Ipc
             {
                 return Marshal.GetDelegateForFunctionPointer<T>(address);
             }
+            _missingExports.Add(name);
             return null;
+        }
+
+        private static void LogLoadResult()
+        {
+            if (_isAvailable)
+            {
+                uint version = _version();
+                string missing = _missingExports.Count == 0 ? string.Empty : $" (missing exports: {string.Join(", ", _missingExports)})";
+                Logger.Info?.Print(LogClass.Application, $"Ryurust: using native {LibraryName} {version >> 16}.{version & 0xFFFF} from {_loadedFrom}{missing}");
+            }
+            else if (_loadedFrom == null && _loadFailure == null)
+            {
+                Logger.Info?.Print(LogClass.Application, $"Ryurust: {LibraryName} not found, using the C# implementation");
+            }
+            else
+            {
+                string reason = _loadFailure
+                    ?? (_missingExports.Count != 0 ? $"missing exports: {string.Join(", ", _missingExports)}" : "version too old");
+                Logger.Warning?.Print(LogClass.Application, $"Ryurust: {LibraryName} found at {_loadedFrom ?? "an unknown path"} but not usable ({reason}), using the C# implementation");
+            }
         }
 
         public static bool TryParse(ReadOnlySpan<byte> data, long cmdPtr, out NativeParsedIpcMessage parsed)
