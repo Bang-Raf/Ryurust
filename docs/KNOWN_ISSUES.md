@@ -41,9 +41,41 @@ the PR title.
 
 ## Gameplay testing
 
-The v0.1.0 Linux package was installed from
-`ghcr.io/bang-raf/ryurust:0.1.0` and played on 2026-11-11 (Fedora 44,
-Intel Core Ultra 7 256V with integrated Arc graphics, firmware 22.5.0).
+All sessions so far ran on one machine: Fedora 44, Intel Core Ultra 7 256V
+with integrated Arc graphics (Mesa 26.2.5, Vulkan), firmware 22.5.0.
+
+### v0.1.1 (2026-11-13)
+
+The package was installed from `ghcr.io/bang-raf/ryurust:0.1.1`. Both games
+were played in one emulator session (9.5 minutes).
+
+| Game | Session length | Result |
+| :--- | :--- | :--- |
+| NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS v1.7.0 | 6 min | No crash, clean stop |
+| The Legend of Zelda: Tears of the Kingdom v1.4.3 | 3 min | No crash, clean stop |
+
+What the log showed:
+
+- The only error lines are the same `SurfaceFlinger DequeueBuffer` pair as in
+  v0.1.0, once per game at the moment it is stopped. Nothing is logged as an
+  error while a game runs.
+- Warnings: `GPU processing thread is too slow` 6 times (the NARUTO shader
+  cache started empty), JIT cache growth twice in TOTK, and the
+  `TerminationRequested` lines of guest threads exiting at stop. The same
+  kinds of warning appear in the v0.1.0 log, and no new kind.
+- NARUTO logs `ServiceAcc CheckAvailability` and `GetAccountId` stubs about
+  30 times a second (about 20,000 lines in 6 minutes). This is upstream
+  Ryubing's stub for the online account service, which Ryurust doesn't touch.
+
+Limits: this is the first build in which the native RomFS index can be
+created, and both games loaded and streamed RomFS data without file-system
+errors. But the C# wrappers still don't log which path ran (see "Code-quality
+debt"), so the log can't show whether the Rust index or the C# fallback
+served those lookups. No frame-rate measurements were taken.
+
+### v0.1.0 (2026-11-11)
+
+The package was installed from `ghcr.io/bang-raf/ryurust:0.1.0`.
 
 | Game | Session length | Result |
 | :--- | :--- | :--- |
