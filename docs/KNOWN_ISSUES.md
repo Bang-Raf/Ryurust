@@ -72,10 +72,10 @@ Limits of this test:
   C# fallback. The libraries were present in `lib/`, one of the paths the
   wrappers probe.
 - Found afterwards: in this build the native RomFS index could never be
-  created (see "Fixed after v0.1.0"), so RomFS lookups in these sessions all
+  created (see "Fixed in v0.1.1"), so RomFS lookups in these sessions all
   used the C# path.
 
-## Fixed after v0.1.0
+## Fixed in v0.1.1
 
 Found while closing the issues listed as open in v0.1.0. All fixes come with
 regression tests. No exported function was removed or changed its signature

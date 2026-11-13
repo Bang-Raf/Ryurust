@@ -61,9 +61,9 @@ code, same machine and settings:
 The first alignment-safe rewrite of `ryu-pixel-converter` was 2–2.5× slower;
 it was rewritten with `as_chunks` and now matches the pre-fix speed.
 
-## Changes after v0.1.0 (2026-11-13)
+## Changes in v0.1.1 (2026-11-13)
 
-Six crates changed in ways that could affect speed (see "Fixed after v0.1.0"
+Six crates changed in ways that could affect speed (see "Fixed in v0.1.1"
 in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md)). Each was measured against the
 v0.1.0 code on the same machine in the same session, alternating old and new
 (old, new, old, new) so load affects both alike. Same settings as below; load
