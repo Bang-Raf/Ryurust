@@ -1,6 +1,6 @@
 # Known Issues
 
-Last reviewed: 2026-11-13.
+Last reviewed: 2026-11-14.
 
 This page lists what is still wrong or unfinished, followed by the issues
 fixed before the first public release (so reviewers know what changed and
@@ -31,7 +31,7 @@ the PR title.
   aren't in their own blocks, so they're covered by the function's
   `# Safety` doc rather than a per-operation `// SAFETY:` comment. Moving to
   edition 2024 (`unsafe_op_in_unsafe_fn`) would make that explicit.
-- The wrappers log once whether their library loaded (see "Since v0.1.1"),
+- The wrappers log once whether their library loaded (see "Fixed in v0.1.2"),
   but not how often the native path is taken afterwards: several call sites
   fall back to C# per call (for example on small inputs).
 
@@ -103,8 +103,12 @@ Limits of this test:
   created (see "Fixed in v0.1.1"), so RomFS lookups in these sessions all
   used the C# path.
 
-## Since v0.1.1 (unreleased)
+## Fixed in v0.1.2
 
+- New Windows x64 package (`ryurust-<version>-ryubing-<version>-win_x64.zip`),
+  built and checked by CI; the Rust test suite now also runs on Windows. On
+  GitHub's runners the app can only be started as Administrator, which
+  Ryubing refuses, so the Windows build has not yet run the emulator itself.
 - Each C# wrapper logs one line the first time it is used (at `Application`
   level): `Ryurust: using native <library> <version> from <path>`, or
   `<library> not found, using the C# implementation` (Info), or

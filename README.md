@@ -110,8 +110,8 @@ It's an OCI artifact holding the release `.tar.xz` and its `.sha256`, not a
 runnable container image. Pull it with [ORAS](https://oras.land):
 
 ```bash
-oras pull ghcr.io/bang-raf/ryurust:0.1.1
-sha256sum -c ryurust-0.1.1-ryubing-1.3.352-linux_x64.tar.xz.sha256
+oras pull ghcr.io/bang-raf/ryurust:0.1.2
+sha256sum -c ryurust-0.1.2-ryubing-1.3.352-linux_x64.tar.xz.sha256
 ```
 
 ## Quick start

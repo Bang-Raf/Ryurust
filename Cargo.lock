@@ -487,30 +487,30 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "ryu-audio-dsp"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-audio-fx"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-audio-mixer"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-audio-resampler"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "ryu-buffer-diff"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-common-hash"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rayon",
  "twox-hash",
@@ -518,74 +518,74 @@ dependencies = [
 
 [[package]]
 name = "ryu-gal-queue"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-gpu-gpfifo"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-host1x-syncpoint"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-interval-tree"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-ipc-parser"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-jit-regalloc"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-kernel-scheduler"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-kernel-sync"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-maxwell-state"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-memory-pagetable"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-memory-tracking"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-motion-fusion"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-pixel-converter"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-romfs-indexer"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-shader-cache"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-shader-transpiler"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bumpalo",
 ]
 
 [[package]]
 name = "ryu-storage-fs"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes",
  "cipher 0.4.4",
@@ -596,52 +596,52 @@ dependencies = [
 
 [[package]]
 name = "ryu-surfaceflinger-queue"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-tegra-mme"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-tegra-swizzle"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "ryu-texture-astc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "ryu-texture-bcn"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-texture-matcher"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-video-nvdec"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryu-video-vic"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "ryu-vulkan-descriptors"
-version = "0.1.1"
+version = "0.1.2"
 
 [[package]]
 name = "ryurust-bench"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "ryu-audio-dsp",
