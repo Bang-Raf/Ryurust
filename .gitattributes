@@ -1,0 +1,4 @@
+# The integration patch must keep LF line endings to apply to upstream Ryubing,
+# and shell scripts must stay LF to run under Git Bash on Windows.
+*.patch -text
+*.sh text eol=lf

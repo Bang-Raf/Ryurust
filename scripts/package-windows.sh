@@ -37,8 +37,10 @@ DIST="$ROOT/dist"
 echo "==> Ryurust $VERSION on Ryubing $RYUBING_TAG ($APP_VERSION), win-x64"
 
 # 1. Ryubing source at the pinned base, with the integration patch applied.
+# autocrlf off: Git for Windows converts to CRLF by default, and the patch
+# (LF, like upstream) would then no longer apply.
 if [ ! -d "$SRC/.git" ]; then
-    git clone --depth 1 --branch "$RYUBING_TAG" "$RYUBING_REPO" "$SRC"
+    git -c core.autocrlf=false clone --depth 1 --branch "$RYUBING_TAG" "$RYUBING_REPO" "$SRC"
 fi
 actual="$(git -C "$SRC" rev-parse HEAD)"
 if [ "$actual" != "$RYUBING_COMMIT" ]; then

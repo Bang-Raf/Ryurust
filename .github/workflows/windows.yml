@@ -46,6 +46,8 @@ jobs:
       VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Keep LF line endings so the integration patch applies to upstream.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
