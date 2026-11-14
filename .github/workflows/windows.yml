@@ -71,6 +71,11 @@ jobs:
             dist/ryurust-*-win_x64.zip
             dist/ryurust-*-win_x64.zip.sha256
 
+      # GitHub's Windows runners run as Administrator, and Ryubing refuses to: before
+      # its logger starts it shows a blocking "not intended to be run as administrator"
+      # message box titled "Ryujinx <version>". Under an admin account that box is the
+      # expected result (it proves the exe, its bundled runtime and the version string);
+      # without admin rights the app must write a startup log with no errors.
       - name: Start the app in portable mode
         shell: pwsh
         run: |
@@ -78,23 +83,28 @@ jobs:
           New-Item -ItemType Directory -Force "$app/portable" | Out-Null
           $p = Start-Process -FilePath "$app/Ryujinx.exe" -WorkingDirectory $app -PassThru
           Start-Sleep -Seconds 30
+          $p.Refresh()
+          $title = if ($p.HasExited) { "" } else { $p.MainWindowTitle }
           if ($p.HasExited) { "Ryujinx.exe exited early with code $($p.ExitCode)" } else { Stop-Process -Id $p.Id -Force }
+          "Window title: '$title'"
 
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
           $log = Get-ChildItem "$app/portable/Logs/*.log" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (!$log) {
-            "No log in portable/Logs. Files under portable/:"
-            Get-ChildItem -Recurse "$app/portable" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-            "Logs under %APPDATA%\Ryujinx (portable mode not detected?):"
-            Get-ChildItem "$env:APPDATA/Ryujinx/Logs" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+
+          if ($log) {
+            Get-Content $log | Select-String '\|[NEW]\|' | ForEach-Object { $_.Line }
+            if (!(Select-String -Path $log -Pattern 'ryurust\.' -Quiet)) { throw "version string missing" }
+            if (Select-String -Path $log -Pattern '\|E\|' -Quiet) { throw "errors in the startup log" }
+          } elseif ($admin -and $title -like "Ryujinx *ryurust.*") {
+            "Running as Administrator: Ryujinx showed its admin warning, as expected."
+          } else {
             "Recent .NET / application crash events:"
             Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-3) } -ErrorAction SilentlyContinue |
               Where-Object { $_.ProviderName -in '.NET Runtime', 'Application Error', 'Windows Error Reporting' } |
               ForEach-Object { "--- $($_.ProviderName) $($_.TimeCreated)"; $_.Message }
-            throw "no log written"
+            throw "no startup log and no Ryujinx window (admin: $admin)"
           }
-          Get-Content $log | Select-String '\|[NEW]\|' | ForEach-Object { $_.Line }
-          if (!(Select-String -Path $log -Pattern 'ryurust\.' -Quiet)) { throw "version string missing" }
-          if (Select-String -Path $log -Pattern '\|E\|' -Quiet) { throw "errors in the startup log" }
           Remove-Item -Recurse -Force "$app/portable"
 
       - name: Attach to the release

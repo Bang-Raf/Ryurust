@@ -112,8 +112,14 @@ release, or when run by hand, it also builds the package and checks it:
 - [`scripts/check-exports.py`](../scripts/check-exports.py) loads every DLL
   and checks each export the C# wrappers look up. A DLL that needs a runtime
   the machine lacks fails to load here.
-- `Ryujinx.exe` is started in portable mode for 30 seconds; the log must show
-  the Ryurust version string and no errors.
+- `Ryujinx.exe` is started in portable mode for 30 seconds. GitHub's Windows
+  runners run as Administrator, which Ryubing refuses: it shows a blocking
+  "not intended to be run as administrator" message box before its logger
+  starts. Under an admin account that box, titled `Ryujinx <version>`, is the
+  expected result. It shows the exe and its bundled runtime start and carry the
+  Ryurust version, but it doesn't get as far as the emulator itself. Run as a
+  normal user, the app must write a startup log with the version string and no
+  errors. Test a Windows build on a real Windows machine before releasing it.
 
 The package is uploaded as a workflow artifact. To build one without a
 release:
