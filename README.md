@@ -22,7 +22,7 @@ when a library isn't present.
 | Crates | 32 |
 | Tests | 374, all passing (`cargo test --workspace`), plus golden tests against C# ASTC output and a LibHac-built RomFS image |
 | Benchmarks | 121 Criterion benchmarks, one suite per crate ([results](docs/BENCHMARKS.md)) |
-| Wired into Ryubing | 13 crates have C# wrappers; 10 of those are called from emulator code |
+| Wired into Ryubing | 14 crates have C# wrappers; 6 of those are called from emulator code (see [`docs/PERFORMANCE_RESEARCH.md`](docs/PERFORMANCE_RESEARCH.md) for why the others were unwired) |
 | Platforms | x86_64 Linux and Windows (the Windows build and test suite run in CI). AVX2 paths are chosen at runtime with scalar fallbacks. |
 | License | MIT |
 
@@ -33,36 +33,36 @@ blank = no wrapper.
 
 | Area | Crate | What it does | C# |
 | :--- | :--- | :--- | :---: |
-| Textures | `ryu-texture-astc` | ASTC block decompression to RGBA8 | |
+| Textures | `ryu-texture-astc` | ASTC decoding to RGBA8 for GPUs without ASTC support (about 2x faster than C#, identical output) | ● |
 | | `ryu-texture-bcn` | BC1–BC7 (incl. BC6H) surface decoding | |
 | | `ryu-tegra-swizzle` | Tegra block-linear ↔ linear layout conversion | |
 | | `ryu-pixel-converter` | Pixel format conversion (R5G6B5, R4G4B4A4, BGRA8 → RGBA8, …) | |
-| | `ryu-texture-matcher` | Packed texture-format / sampler compatibility checks for the texture cache | ● |
+| | `ryu-texture-matcher` | Packed texture-format / sampler compatibility checks for the texture cache | ○ |
 | GPU | `ryu-gpu-gpfifo` | GPFIFO push-buffer method parser | |
 | | `ryu-tegra-mme` | Maxwell Macro Execution Engine interpreter | |
-| | `ryu-maxwell-state` | Dirty-register scanning (AVX2) and pipeline-state hashing | ● |
+| | `ryu-maxwell-state` | Dirty-register scanning (AVX2) and pipeline-state hashing | ○ |
 | | `ryu-gal-queue` | SPSC command queue and span pool for the render thread | |
 | | `ryu-host1x-syncpoint` | Host1x syncpoint / fence sequencing | |
 | | `ryu-buffer-diff` | Dirty-range detection for uniform buffer updates (AVX2) | ● |
 | | `ryu-interval-tree` | Range-overlap queries for texture/buffer caches (sorted array) | ○ |
-| | `ryu-vulkan-descriptors` | Descriptor-set state tracking and redundancy filtering | ● |
+| | `ryu-vulkan-descriptors` | Descriptor-set state tracking and redundancy filtering | ○ |
 | Shaders | `ryu-shader-transpiler` | Maxwell shader → SPIR-V (**prototype, output not valid yet**) | |
 | | `ryu-shader-cache` | Shader disk-cache TOC parsing, LZ4, CRC32 | ○ |
 | Video | `ryu-video-nvdec` | VP9 IDCT and loop-filter kernels (**not a full VP9 decoder**) | |
 | | `ryu-video-vic` | VIC surface blending, colour-space conversion, deinterlacing | |
 | Audio | `ryu-audio-dsp` | Audio renderer command processing (mix, volume, biquad) | |
 | | `ryu-audio-fx` | Biquad filter effects | |
-| | `ryu-audio-mixer` | Multi-voice mixing and volume ramps (AVX2) | ● |
+| | `ryu-audio-mixer` | Multi-voice mixing and volume ramps (AVX2) | ○ |
 | | `ryu-audio-resampler` | Polyphase resampling and ADPCM decoding | |
 | Memory | `ryu-memory-pagetable` | 48-bit guest virtual address page table | |
 | | `ryu-memory-tracking` | Atomic page bitmap for dirty-memory tracking | |
 | Kernel / OS | `ryu-kernel-sync` | Address-arbiter wait tables | |
-| | `ryu-kernel-scheduler` | Priority-bitmask thread scheduler | ● |
+| | `ryu-kernel-scheduler` | Priority-bitmask thread scheduler | ○ |
 | | `ryu-ipc-parser` | Horizon OS CMIF/TIPC IPC message parse and serialize | ○ |
 | | `ryu-surfaceflinger-queue` | SurfaceFlinger buffer queue and binder parcels | ● |
 | Storage | `ryu-storage-fs` | NCA AES-CTR decryption, LZ4/zstd, PFS0 lookup | |
 | | `ryu-romfs-indexer` | RomFS path lookup (used to locate base-game files when RomFS mods are applied) | ● |
-| JIT | `ryu-jit-regalloc` | Linear-scan register allocator and AVX2 bitset helpers for ARMeilleure | ● |
+| JIT | `ryu-jit-regalloc` | Linear-scan register allocator and AVX2 bitset helpers for ARMeilleure (only the bitset helpers are called, for bitmaps of 32+ words) | ● |
 | Input | `ryu-motion-fusion` | Mahony IMU sensor fusion for motion controls | ● |
 | Common | `ryu-common-hash` | xxHash3-128 (via `twox-hash`) with batching and a C ABI | |
 

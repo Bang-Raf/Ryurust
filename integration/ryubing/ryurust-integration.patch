@@ -1,19 +1,3 @@
-diff --git a/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs b/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
-index 94883b39b05d32385756686c09d4ba93a376748e..93dc5606d29bb48f7184ed051b035088b7eb99d0 100644
---- a/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
-+++ b/src/ARMeilleure/CodeGen/RegisterAllocators/LinearScanAllocator.cs
-@@ -446,6 +446,11 @@ namespace ARMeilleure.CodeGen.RegisterAllocators
- 
-         private static int GetHighestValueIndex(ReadOnlySpan<int> span)
-         {
-+            if (NativeJitRegAlloc.IsAvailable && span.Length > 0)
-+            {
-+                return NativeJitRegAlloc.GetHighestIndex(span);
-+            }
-+
-             int highest = int.MinValue;
- 
-             int selected = 0;
 diff --git a/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs b/src/ARMeilleure/CodeGen/RegisterAllocators/NativeJitRegAlloc.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..0c2eb4057d786da3df44039ca15067360028e173
@@ -248,7 +232,7 @@ index 0000000000000000000000000000000000000000..0c2eb4057d786da3df44039ca1506736
 +    }
 +}
 diff --git a/src/ARMeilleure/Common/BitMap.cs b/src/ARMeilleure/Common/BitMap.cs
-index 52e1926992516a90cf34d597333f690ff262b29d..365bd346475e93b2851f4dafec9060c3dddda738 100644
+index 52e1926992516a90cf34d597333f690ff262b29d..df72cb626005a7abd7068d10f2501cb356f8b3ca 100644
 --- a/src/ARMeilleure/Common/BitMap.cs
 +++ b/src/ARMeilleure/Common/BitMap.cs
 @@ -1,3 +1,4 @@
@@ -256,11 +240,20 @@ index 52e1926992516a90cf34d597333f690ff262b29d..365bd346475e93b2851f4dafec9060c3
  using System;
  using System.Collections;
  using System.Collections.Generic;
-@@ -85,6 +86,11 @@ namespace ARMeilleure.Common
+@@ -81,10 +82,20 @@ namespace ARMeilleure.Common
+             return _count * IntSize;
+         }
+ 
++        // Below this many 64-bit words the C# loop beats a native call: crossing into the
++        // library costs about 8 ns, while OR-ing 8 words in C# takes about 4 ns.
++        // Measured break-even is between 8 and 32 words.
++        private const int NativeMinWords = 32;
++
+         public bool Set(BitMap map)
          {
              EnsureCapacity(map._count * IntSize);
  
-+            if (NativeJitRegAlloc.IsAvailable && _count >= 4)
++            if (NativeJitRegAlloc.IsAvailable && _count >= NativeMinWords)
 +            {
 +                return NativeJitRegAlloc.BitsetOr(_masks, map._masks, Math.Min(_count, map._count));
 +            }
@@ -268,11 +261,11 @@ index 52e1926992516a90cf34d597333f690ff262b29d..365bd346475e93b2851f4dafec9060c3
              bool modified = false;
  
              for (int index = 0; index < _count; index++)
-@@ -106,6 +112,11 @@ namespace ARMeilleure.Common
+@@ -106,6 +117,11 @@ namespace ARMeilleure.Common
          {
              EnsureCapacity(map._count * IntSize);
  
-+            if (NativeJitRegAlloc.IsAvailable && _count >= 4)
++            if (NativeJitRegAlloc.IsAvailable && _count >= NativeMinWords)
 +            {
 +                return NativeJitRegAlloc.BitsetAndNot(_masks, map._masks, Math.Min(_count, map._count));
 +            }
@@ -304,38 +297,6 @@ index 4ab8b37ee838724a83f18be29ec64382a149f919..bce07cb39ad7a9028602b3b9b148303e
              Logger.Warning?.Print(LogClass.Cpu, $"JIT Cache of size {(_jitRegions.Count * CacheSize).Bytes()} exhausted, creating new Cache Region ({((_jitRegions.Count + 1) * CacheSize).Bytes()} Total Allocation).");
  
              _jitRegions.Add(newRegion);
-diff --git a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
-index 0dca27bcac5e8a3e23be02d8cbfa52da0ba6b1de..bbdd05b9e2a5e59b383f8d51116506afe1961537 100644
---- a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
-+++ b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixCommand.cs
-@@ -115,6 +115,11 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
-         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-         private void ProcessMix(Span<float> outputMix, ReadOnlySpan<float> inputMix)
-         {
-+            if (NativeAudioMixer.TryMix(outputMix, inputMix, Volume))
-+            {
-+                return;
-+            }
-+
-             if (Avx.IsSupported)
-             {
-                 ProcessMixAvx(outputMix, inputMix);
-diff --git a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
-index be6aec5a66cac976b3db3e3f778327d930effcf3..16c16d6c9e0f0648ac7fef8040a1e1076bd5b2c9 100644
---- a/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
-+++ b/src/Ryujinx.Audio/Renderer/Dsp/Command/MixRampCommand.cs
-@@ -49,6 +49,11 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
-         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-         private float ProcessMixRamp(Span<float> outputBuffer, ReadOnlySpan<float> inputBuffer, int sampleCount)
-         {
-+            if (NativeAudioMixer.TryMixRamp(outputBuffer[..sampleCount], inputBuffer[..sampleCount], Volume0, Volume1, out float lastSample))
-+            {
-+                return lastSample;
-+            }
-+
-             float ramp = (Volume1 - Volume0) / sampleCount;
-             float volume = Volume0;
-             float state = 0;
 diff --git a/src/Ryujinx.Audio/Renderer/Dsp/NativeAudioMixer.cs b/src/Ryujinx.Audio/Renderer/Dsp/NativeAudioMixer.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..9bc82abda0074f64fc33847fee6848878297016c
@@ -1175,81 +1136,6 @@ index 6fc49fc8dfd0b30004011d6e3518592d518eebca..8eef8cf145aad844f7264663e5581661
                  }
  
                  _ubFollowUpAddress = 0;
-diff --git a/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs b/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
-index 3e77eb8acd86857fdcd4c4cf170934b457546913..7de2d6c8b07b8de2b63e66be0779495b2222784e 100644
---- a/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
-+++ b/src/Ryujinx.Graphics.Gpu/Engine/Threed/StateUpdateTracker.cs
-@@ -1,3 +1,4 @@
-+using Ryujinx.Common;
- using System;
- using System.Collections.Generic;
- using System.Diagnostics;
-@@ -48,6 +49,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
-         private readonly byte[] _registerToGroupMapping;
-         private readonly Action[] _callbacks;
-         private ulong _dirtyMask;
-+        private readonly IntPtr _nativeTracker;
- 
-         /// <summary>
-         /// Creates a new instance of the state update tracker.
-@@ -57,6 +59,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
-         {
-             _registerToGroupMapping = new byte[BlockSize];
-             _callbacks = new Action[entries.Length];
-+            _nativeTracker = NativeMaxwellState.IsAvailable ? NativeMaxwellState.CreateTracker() : IntPtr.Zero;
- 
-             Dictionary<string, int> fieldToDelegate = new();
- 
-@@ -86,10 +89,15 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
- 
-                 if (fieldToDelegate.TryGetValue(field.Name, out int entryIndex))
-                 {
--                    for (int i = 0; i < ((sizeOfField + 3) & ~3); i += 4)
-+                    int alignedSize = (sizeOfField + 3) & ~3;
-+                    for (int i = 0; i < alignedSize; i += 4)
-                     {
-                         _registerToGroupMapping[(offset + i) / RegisterSize] = (byte)(entryIndex + 1);
-                     }
-+                    if (_nativeTracker != IntPtr.Zero)
-+                    {
-+                        NativeMaxwellState.MapRange(_nativeTracker, (uint)offset, (uint)alignedSize, (byte)entryIndex);
-+                    }
-                 }
- 
-                 offset += sizeOfField;
-@@ -176,5 +184,32 @@ namespace Ryujinx.Graphics.Gpu.Engine.Threed
- 
-             _dirtyMask &= ~checkMask;
-         }
-+
-+        public void ScanChanges(ReadOnlySpan<byte> current, ReadOnlySpan<byte> shadow)
-+        {
-+            if (_nativeTracker != IntPtr.Zero)
-+            {
-+                _dirtyMask |= NativeMaxwellState.ScanChanges(_nativeTracker, current, shadow);
-+                return;
-+            }
-+
-+            int len = Math.Min(current.Length, shadow.Length);
-+            for (int off = 0; off + 4 <= len && (off / RegisterSize) < BlockSize; off += 4)
-+            {
-+                if (Unsafe.ReadUnaligned<uint>(ref MemoryMarshal.GetReference(current[off..])) !=
-+                    Unsafe.ReadUnaligned<uint>(ref MemoryMarshal.GetReference(shadow[off..])))
-+                {
-+                    SetDirty(off);
-+                }
-+            }
-+        }
-+
-+        ~StateUpdateTracker()
-+        {
-+            if (_nativeTracker != IntPtr.Zero)
-+            {
-+                NativeMaxwellState.DestroyTracker(_nativeTracker);
-+            }
-+        }
-     }
- }
 diff --git a/src/Ryujinx.Graphics.Gpu/Image/NativeTextureMatcher.cs b/src/Ryujinx.Graphics.Gpu/Image/NativeTextureMatcher.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..0fc26a7b1450c74554fd86acd2a8a98e129d6afb
@@ -1521,77 +1407,6 @@ index 0000000000000000000000000000000000000000..0fc26a7b1450c74554fd86acd2a8a98e
 +        }
 +    }
 +}
-diff --git a/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs b/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
-index af7e9a7afae3db366b1f769dac5337d0551d53db..f034007d347eae026d0fd675fbb9df3abfc8410f 100644
---- a/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
-+++ b/src/Ryujinx.Graphics.Gpu/Image/TextureCompatibility.cs
-@@ -227,6 +227,10 @@ namespace Ryujinx.Graphics.Gpu.Image
-         /// <returns>A value indicating how well the formats match</returns>
-         public static TextureMatchQuality FormatMatches(TextureInfo lhs, TextureInfo rhs, bool forSampler, bool depthAlias)
-         {
-+            if (NativeTextureMatcher.IsAvailable)
-+            {
-+                return NativeTextureMatcher.FormatMatches((uint)lhs.FormatInfo.Format, (uint)rhs.FormatInfo.Format, forSampler, depthAlias);
-+            }
-             // D32F and R32F texture have the same representation internally,
-             // however the R32F format is used to sample from depth textures.
-             if (IsValidDepthAsColorAlias(lhs.FormatInfo.Format, rhs.FormatInfo.Format) && (forSampler || depthAlias))
-@@ -819,8 +823,31 @@ namespace Ryujinx.Graphics.Gpu.Image
-         /// <param name="lhs">Texture information to compare</param>
-         /// <param name="rhs">Texture information to compare with</param>
-         /// <returns>True if the texture shader sampling parameters matches, false otherwise</returns>
-+        private static ulong PackTextureKey(TextureInfo info)
-+        {
-+            return NativeTextureMatcher.PackKey(
-+                (ushort)info.FormatInfo.Format,
-+                (byte)info.Target,
-+                (byte)info.SwizzleR,
-+                (byte)info.SwizzleG,
-+                (byte)info.SwizzleB,
-+                (byte)info.SwizzleA,
-+                (byte)info.DepthStencilMode,
-+                (byte)info.SamplesInX,
-+                (byte)info.SamplesInY,
-+                info.IsLinear,
-+                info.FormatInfo.BytesPerPixel,
-+                info.FormatInfo.IsCompressed,
-+                info.FormatInfo.Format.IsDepthOrStencil);
-+        }
-+
-         public static bool SamplerParamsMatches(TextureInfo lhs, TextureInfo rhs)
-         {
-+            if (NativeTextureMatcher.IsAvailable)
-+            {
-+                return NativeTextureMatcher.SamplerMatches(PackTextureKey(lhs), PackTextureKey(rhs));
-+            }
-+
-             return lhs.DepthStencilMode == rhs.DepthStencilMode &&
-                    lhs.SwizzleR == rhs.SwizzleR &&
-                    lhs.SwizzleG == rhs.SwizzleG &&
-@@ -836,6 +863,11 @@ namespace Ryujinx.Graphics.Gpu.Image
-         /// <returns>True if the texture target and samples count matches, false otherwise</returns>
-         public static bool TargetAndSamplesCompatible(TextureInfo lhs, TextureInfo rhs)
-         {
-+            if (NativeTextureMatcher.IsAvailable)
-+            {
-+                return NativeTextureMatcher.TargetSamplesCompatible(PackTextureKey(lhs), PackTextureKey(rhs));
-+            }
-+
-             return lhs.Target == rhs.Target &&
-                    lhs.SamplesInX == rhs.SamplesInX &&
-                    lhs.SamplesInY == rhs.SamplesInY;
-@@ -848,6 +880,11 @@ namespace Ryujinx.Graphics.Gpu.Image
-         /// <returns>Format class</returns>
-         private static FormatClass GetFormatClass(Format format)
-         {
-+            if (NativeTextureMatcher.IsAvailable)
-+            {
-+                return (FormatClass)NativeTextureMatcher.GetFormatClass((uint)format);
-+            }
-+
-             return format switch
-             {
-                 Format.Bc1RgbaSrgb or Format.Bc1RgbaUnorm => FormatClass.Bc1Rgba,
 diff --git a/src/Ryujinx.Graphics.Gpu/Memory/NativeBufferDiff.cs b/src/Ryujinx.Graphics.Gpu/Memory/NativeBufferDiff.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..a2332be4263fe5d5d072c459f0b5dbd6b2215528
@@ -1804,32 +1619,6 @@ index 0000000000000000000000000000000000000000..a2332be4263fe5d5d072c459f0b5dbd6
 +        }
 +    }
 +}
-diff --git a/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs b/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
-index 0b1424b8a1d03d4ef1222fe74ea01cc5964a5a92..01a46e42991e507b5d5ab613bd1aed5c86b8aa48 100644
---- a/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
-+++ b/src/Ryujinx.Graphics.Gpu/Memory/PhysicalMemory.cs
-@@ -308,6 +308,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
-         /// <returns>True if the data was changed, false otherwise</returns>
-         public bool WriteWithRedundancyCheck(ulong address, ReadOnlySpan<byte> data)
-         {
-+            if (NativeBufferDiff.IsAvailable && data.Length >= 32 && _cpuMemory.IsMapped(address))
-+            {
-+                ReadOnlySpan<byte> current = _cpuMemory.GetSpan(address, data.Length);
-+                if (NativeBufferDiff.TryIsEqual(data, current, out bool isEqual))
-+                {
-+                    if (isEqual)
-+                    {
-+                        return false;
-+                    }
-+
-+                    _cpuMemory.Write(address, data);
-+                    return true;
-+                }
-+            }
-+
-             return _cpuMemory.WriteWithRedundancyCheck(address, data);
-         }
- 
 diff --git a/src/Ryujinx.Graphics.Gpu/Shader/DiskCache/NativeShaderCache.cs b/src/Ryujinx.Graphics.Gpu/Shader/DiskCache/NativeShaderCache.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..f4fba838b1d0e9ba7e71f685abd39839677f9195
@@ -2173,77 +1962,192 @@ index 79383ec4d9e9913ae55fb9fcf5dbd12870853bc9..bc9504aad0942100d42cfd9ac92496cd
                  context.Logger.Log("Shader has barrier on potentially divergent block, the barrier will be removed.");
  
                  return OperationResult.Invalid;
-diff --git a/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs b/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
-index 2daa048561fe853f0416d1d762e2341f73b9f677..0344f8ed79c774d7a9c9aba442cf242147de03bf 100644
---- a/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
-+++ b/src/Ryujinx.Graphics.Vulkan/DescriptorSetUpdater.cs
-@@ -125,12 +125,18 @@ namespace Ryujinx.Graphics.Vulkan
-         private readonly SamplerHolder _dummySampler;
+diff --git a/src/Ryujinx.Graphics.Texture/Astc/AstcDecoder.cs b/src/Ryujinx.Graphics.Texture/Astc/AstcDecoder.cs
+index 1053f6f18be3705697cbff20c6e8aceb48569484..b7497b37d5c389752fa9b49c472c089cf6695f44 100644
+--- a/src/Ryujinx.Graphics.Texture/Astc/AstcDecoder.cs
++++ b/src/Ryujinx.Graphics.Texture/Astc/AstcDecoder.cs
+@@ -298,6 +298,22 @@ namespace Ryujinx.Graphics.Texture.Astc
  
-         public List<TextureView> FeedbackLoopHazards { get; private set; }
-+        private readonly IntPtr _nativeDescriptorState;
+             AstcDecoder decoder = new(data, decoded.Memory, blockWidth, blockHeight, width, height, depth, levels, layers);
  
-         public DescriptorSetUpdater(VulkanRenderer gd, Device device)
-         {
-             _gd = gd;
-             _device = device;
- 
-+            if (NativeVulkanDescriptors.IsAvailable)
++            // Ryurust: the native decoder's output is byte-identical to this decoder's, including
++            // the zeroed texels of invalid blocks, and it is about 1.7-2x faster. Status 1 with the
++            // whole input present means "some block was invalid, output fully written", which is
++            // this decoder's `false` result. Anything else (short input, bad arguments, library
++            // missing) falls through to the C# decoder.
++            int status = NativeTextureAstc.DecodeToRgba8(data.Span, decoded.Memory.Span, blockWidth, blockHeight, width, height, depth, levels, layers);
++            if (status == 0)
 +            {
-+                _nativeDescriptorState = NativeVulkanDescriptors.Create();
++                return true;
 +            }
 +
-             // Some of the bindings counts needs to be multiplied by 2 because we have buffer and
-             // regular textures/images interleaved on the same descriptor set.
- 
-@@ -450,6 +456,17 @@ namespace Ryujinx.Graphics.Vulkan
- 
-                     currentInfo = info;
-                     currentBufferRef = newRef;
-+
-+                    if (_nativeDescriptorState != IntPtr.Zero)
-+                    {
-+                        NativeVulkanDescriptors.UpdateBuffer(
-+                            _nativeDescriptorState,
-+                            NativeVulkanDescriptors.SetStorage,
-+                            (uint)index,
-+                            vkBuffer?.GetUnsafe().Value.Handle ?? 0,
-+                            info.Offset,
-+                            info.Range);
-+                    }
-                 }
-             }
- 
-@@ -660,6 +677,17 @@ namespace Ryujinx.Graphics.Vulkan
- 
-                     currentInfo = info;
-                     currentBufferRef = newRef;
-+
-+                    if (_nativeDescriptorState != IntPtr.Zero)
-+                    {
-+                        NativeVulkanDescriptors.UpdateBuffer(
-+                            _nativeDescriptorState,
-+                            NativeVulkanDescriptors.SetUniform,
-+                            (uint)index,
-+                            vkBuffer?.GetUnsafe().Value.Handle ?? 0,
-+                            info.Offset,
-+                            info.Range);
-+                    }
-                 }
-             }
- 
-@@ -1174,6 +1202,11 @@ namespace Ryujinx.Graphics.Vulkan
- 
-         protected virtual void Dispose(bool disposing)
-         {
-+            if (_nativeDescriptorState != IntPtr.Zero)
++            if (status == 1 && data.Length >= (long)decoder.TotalBlockCount * 16)
 +            {
-+                NativeVulkanDescriptors.Destroy(_nativeDescriptorState);
++                return false;
 +            }
 +
-             if (disposing)
-             {
-                 _dummyTexture.Dispose();
+             Enumerable.Range(0, decoder.TotalBlockCount).AsParallel().ForAll(x => decoder.ProcessBlock(x));
+ 
+             return decoder.Success;
+diff --git a/src/Ryujinx.Graphics.Texture/Astc/NativeTextureAstc.cs b/src/Ryujinx.Graphics.Texture/Astc/NativeTextureAstc.cs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c056db4540f00b25859735d713d56c7a15b9eda
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Texture/Astc/NativeTextureAstc.cs
+@@ -0,0 +1,153 @@
++using Ryujinx.Common.Logging;
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Reflection;
++using System.Runtime.InteropServices;
++
++namespace Ryujinx.Graphics.Texture.Astc
++{
++    /// <summary>
++    /// ASTC to RGBA8 decoding in the native <c>ryu_texture_astc</c> library. Its output is
++    /// byte-identical to <see cref="AstcDecoder"/> (checked by golden tests against this C#
++    /// decoder) and it is about 1.6-2x faster.
++    /// </summary>
++    public static unsafe class NativeTextureAstc
++    {
++        private const string LibraryName = "ryu_texture_astc";
++
++        private delegate uint VersionFn();
++        private delegate int DecodeFn(byte* input, nuint inputLen, byte* output, nuint outputLen,
++            int blockWidth, int blockHeight, int width, int height, int depth, int levels, int layers);
++
++        private static readonly VersionFn _version;
++        private static readonly DecodeFn _decodeParallel;
++
++        private static readonly bool _isAvailable;
++        private static string _loadedFrom;
++        private static string _loadFailure;
++        private static readonly List<string> _missingExports = [];
++
++        public static bool IsAvailable => _isAvailable;
++
++        static NativeTextureAstc()
++        {
++            try
++            {
++                IntPtr handle = LoadNativeLibrary();
++                if (handle != IntPtr.Zero)
++                {
++                    _version = GetExport<VersionFn>(handle, "ryu_texture_astc_version");
++                    _decodeParallel = GetExport<DecodeFn>(handle, "ryu_astc_decode_to_rgba8_parallel");
++
++                    _isAvailable = _version != null && _decodeParallel != null && _version() >= 0x00010000;
++                }
++            }
++            catch (Exception e)
++            {
++                _isAvailable = false;
++                _loadFailure = e.Message;
++            }
++
++            LogLoadResult();
++        }
++
++        private static IntPtr LoadNativeLibrary()
++        {
++            string ext = OperatingSystem.IsWindows() ? ".dll" : (OperatingSystem.IsMacOS() ? ".dylib" : ".so");
++            string prefix = OperatingSystem.IsWindows() ? string.Empty : "lib";
++            string fileName = $"{prefix}{LibraryName}{ext}";
++
++            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
++            string[] probePaths = [
++                Path.Combine(baseDir, fileName),
++                Path.Combine(baseDir, "lib", fileName),
++                Path.Combine(baseDir, "runtimes", "linux-x64", "native", fileName),
++                Path.Combine(baseDir, "..", "linux_test_suite", "lib", fileName),
++                Path.Combine(baseDir, "..", "crates", "target", "release", fileName),
++                fileName
++            ];
++
++            foreach (string path in probePaths)
++            {
++                if (File.Exists(path) && NativeLibrary.TryLoad(path, out IntPtr h))
++                {
++                    _loadedFrom = path;
++                    return h;
++                }
++            }
++
++            if (NativeLibrary.TryLoad(LibraryName, Assembly.GetExecutingAssembly(), null, out IntPtr defaultHandle))
++            {
++                _loadedFrom = $"{LibraryName} (system library path)";
++                return defaultHandle;
++            }
++
++            return IntPtr.Zero;
++        }
++
++        private static T GetExport<T>(IntPtr handle, string name) where T : Delegate
++        {
++            if (NativeLibrary.TryGetExport(handle, name, out IntPtr address))
++            {
++                return Marshal.GetDelegateForFunctionPointer<T>(address);
++            }
++            _missingExports.Add(name);
++            return null;
++        }
++
++        private static void LogLoadResult()
++        {
++            if (_isAvailable)
++            {
++                uint version = _version();
++                string missing = _missingExports.Count == 0 ? string.Empty : $" (missing exports: {string.Join(", ", _missingExports)})";
++                Logger.Info?.Print(LogClass.Application, $"Ryurust: using native {LibraryName} {version >> 16}.{version & 0xFFFF} from {_loadedFrom}{missing}");
++            }
++            else if (_loadedFrom == null && _loadFailure == null)
++            {
++                Logger.Info?.Print(LogClass.Application, $"Ryurust: {LibraryName} not found, using the C# implementation");
++            }
++            else
++            {
++                string reason = _loadFailure
++                    ?? (_missingExports.Count != 0 ? $"missing exports: {string.Join(", ", _missingExports)}" : "version too old");
++                Logger.Warning?.Print(LogClass.Application, $"Ryurust: {LibraryName} found at {_loadedFrom ?? "an unknown path"} but not usable ({reason}), using the C# implementation");
++            }
++        }
++
++        /// <summary>Returned by <see cref="DecodeToRgba8"/> when the native library is not usable.</summary>
++        public const int StatusUnavailable = -100;
++
++        /// <summary>
++        /// Decodes a whole texture (all levels and layers) on all cores. Returns the native
++        /// status: 0 when every block decoded; 1 when the output was fully written but some
++        /// block was invalid (texels zero, as in C#) or, with nothing written, when the input
++        /// or output is too short; -1 / -2 for bad arguments; <see cref="StatusUnavailable"/>
++        /// when the library is missing.
++        /// </summary>
++        public static int DecodeToRgba8(
++            ReadOnlySpan<byte> data,
++            Span<byte> output,
++            int blockWidth,
++            int blockHeight,
++            int width,
++            int height,
++            int depth,
++            int levels,
++            int layers)
++        {
++            if (!_isAvailable || data.IsEmpty || output.IsEmpty)
++            {
++                return StatusUnavailable;
++            }
++
++            fixed (byte* pIn = data)
++            fixed (byte* pOut = output)
++            {
++                return _decodeParallel(pIn, (nuint)data.Length, pOut, (nuint)output.Length,
++                    blockWidth, blockHeight, width, height, depth, levels, layers);
++            }
++        }
++    }
++}
 diff --git a/src/Ryujinx.Graphics.Vulkan/NativeVulkanDescriptors.cs b/src/Ryujinx.Graphics.Vulkan/NativeVulkanDescriptors.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..dc61ee75482a4c5d53475bc5ba323e5ce59b8410
@@ -2488,53 +2392,6 @@ index 0000000000000000000000000000000000000000..dc61ee75482a4c5d53475bc5ba323e5c
 +        public static void CommitAll(IntPtr state, uint setType) => _commitAll?.Invoke(state, setType);
 +    }
 +}
-diff --git a/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs b/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
-index da596e23bfef5d7b9195b3971c2bb336a91fa59b..b0483a31d7350d70f3a8430a246e84a802072917 100644
---- a/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
-+++ b/src/Ryujinx.Graphics.Vulkan/PipelineUid.cs
-@@ -1,3 +1,4 @@
-+using Ryujinx.Common;
- using Ryujinx.Common.Memory;
- using Silk.NET.Vulkan;
- using System;
-@@ -72,11 +73,36 @@ namespace Ryujinx.Graphics.Vulkan
- 
-         private static bool SequenceEqual<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, uint count) where T : unmanaged
-         {
--            return MemoryMarshal.Cast<T, byte>(x[..(int)count]).SequenceEqual(MemoryMarshal.Cast<T, byte>(y[..(int)count]));
-+            ReadOnlySpan<byte> sx = MemoryMarshal.Cast<T, byte>(x[..(int)count]);
-+            ReadOnlySpan<byte> sy = MemoryMarshal.Cast<T, byte>(y[..(int)count]);
-+            if (NativeMaxwellState.IsAvailable)
-+            {
-+                return NativeMaxwellState.PipelineEquals(sx, sy);
-+            }
-+            return sx.SequenceEqual(sy);
-         }
- 
-         public override int GetHashCode()
-         {
-+            if (NativeMaxwellState.IsAvailable)
-+            {
-+                ReadOnlySpan<byte> idBytes = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<ulong, byte>(ref Id0), 72);
-+                ulong h = NativeMaxwellState.PipelineHash64(idBytes);
-+                if (VertexAttributeDescriptionsCount > 0)
-+                {
-+                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<VertexInputAttributeDescription, byte>(VertexAttributeDescriptions.AsSpan()[..(int)VertexAttributeDescriptionsCount]));
-+                }
-+                if (VertexBindingDescriptionsCount > 0)
-+                {
-+                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<VertexInputBindingDescription, byte>(VertexBindingDescriptions.AsSpan()[..(int)VertexBindingDescriptionsCount]));
-+                }
-+                if (ColorBlendAttachmentStateCount > 0)
-+                {
-+                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<PipelineColorBlendAttachmentState, byte>(ColorBlendAttachmentState.AsSpan()[..(int)ColorBlendAttachmentStateCount]));
-+                    h ^= NativeMaxwellState.PipelineHash64(MemoryMarshal.Cast<Format, byte>(AttachmentFormats.AsSpan()[..(int)ColorBlendAttachmentStateCount]));
-+                }
-+                return (int)h ^ ((int)(h >> 32) * 17);
-+            }
-             ulong hash64 = Id0 * 23 ^
-                            Id1 * 23 ^
-                            Id2 * 23 ^
 diff --git a/src/Ryujinx.HLE/FileSystem/NativeRomFsImage.cs b/src/Ryujinx.HLE/FileSystem/NativeRomFsImage.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..fb2b7a0fefb873f054d65889721ba40c35814f63
@@ -3056,183 +2913,6 @@ index 0000000000000000000000000000000000000000..ac22d72fa5b9e24403ca7e4d406a86e0
 +        }
 +    }
 +}
-diff --git a/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs b/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
-index e49efca14d1b6d9f28d9e032b13c93e09c61947c..333cfda17438e6cc78145222633b4ed57b455bf8 100644
---- a/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
-+++ b/src/Ryujinx.HLE/HOS/Kernel/Threading/KPriorityQueue.cs
-@@ -1,4 +1,6 @@
-+using System;
- using System.Collections.Generic;
-+using System.Diagnostics;
- using System.Numerics;
- 
- namespace Ryujinx.HLE.HOS.Kernel.Threading
-@@ -11,6 +13,9 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-         private readonly long[] _scheduledPrioritiesPerCore;
-         private readonly long[] _suggestedPrioritiesPerCore;
- 
-+        private readonly IntPtr _nativeState;
-+        private readonly Dictionary<ulong, KThread> _threadsByUid = new();
-+
-         public KPriorityQueue()
-         {
-             _suggestedThreadsPerPrioPerCore = new LinkedList<KThread>[KScheduler.PrioritiesCount][];
-@@ -30,6 +35,19 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
- 
-             _scheduledPrioritiesPerCore = new long[KScheduler.CpuCoresCount];
-             _suggestedPrioritiesPerCore = new long[KScheduler.CpuCoresCount];
-+
-+            if (NativeKernelScheduler.IsAvailable)
-+            {
-+                _nativeState = NativeKernelScheduler.Create();
-+            }
-+        }
-+
-+        ~KPriorityQueue()
-+        {
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                NativeKernelScheduler.Destroy(_nativeState);
-+            }
-         }
- 
-         public readonly ref struct KThreadEnumerable
-@@ -121,11 +139,31 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
- 
-         public KThread ScheduledThreadsFirstOrDefault(int core)
-         {
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                ulong firstUid = NativeKernelScheduler.FirstScheduled(_nativeState, core);
-+                if (firstUid != 0 && _threadsByUid.TryGetValue(firstUid, out KThread nativeThread))
-+                {
-+                    return nativeThread;
-+                }
-+                return null;
-+            }
-+
-             return ScheduledThreadsElementAtOrDefault(core, 0);
-         }
- 
-         public KThread ScheduledThreadsElementAtOrDefault(int core, int index)
-         {
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                ulong uid = NativeKernelScheduler.ElementAtScheduled(_nativeState, core, index);
-+                if (uid != 0 && _threadsByUid.TryGetValue(uid, out KThread nativeThread))
-+                {
-+                    return nativeThread;
-+                }
-+                return null;
-+            }
-+
-             int currentIndex = 0;
-             foreach (KThread scheduledThread in ScheduledThreads(core))
-             {
-@@ -144,6 +182,16 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
- 
-         public KThread ScheduledThreadsWithDynamicPriorityFirstOrDefault(int core, int dynamicPriority)
-         {
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                ulong uid = NativeKernelScheduler.DynamicPrioFirst(_nativeState, core, dynamicPriority);
-+                if (uid != 0 && _threadsByUid.TryGetValue(uid, out KThread nativeThread))
-+                {
-+                    return nativeThread;
-+                }
-+                return null;
-+            }
-+
-             foreach (KThread scheduledThread in ScheduledThreads(core))
-             {
-                 if (scheduledThread.DynamicPriority == dynamicPriority)
-@@ -157,6 +205,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
- 
-         public bool HasScheduledThreads(int core)
-         {
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                return NativeKernelScheduler.HasScheduled(_nativeState, core);
-+            }
-+
-             return ScheduledThreadsFirstOrDefault(core) != null;
-         }
- 
-@@ -197,6 +250,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-             SuggestedQueue(prio, core).AddFirst(thread.SiblingsPerCore[core]);
- 
-             _suggestedPrioritiesPerCore[core] |= 1L << prio;
-+
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                _threadsByUid[thread.ThreadUid] = thread;
-+                NativeKernelScheduler.Suggest(_nativeState, prio, core, thread.ThreadUid);
-+            }
-         }
- 
-         public void Unsuggest(int prio, int core, KThread thread)
-@@ -214,6 +273,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-             {
-                 _suggestedPrioritiesPerCore[core] &= ~(1L << prio);
-             }
-+
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                NativeKernelScheduler.Unsuggest(_nativeState, prio, core, thread.ThreadUid);
-+            }
-         }
- 
-         public void Schedule(int prio, int core, KThread thread)
-@@ -226,6 +290,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-             ScheduledQueue(prio, core).AddLast(thread.SiblingsPerCore[core]);
- 
-             _scheduledPrioritiesPerCore[core] |= 1L << prio;
-+
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                _threadsByUid[thread.ThreadUid] = thread;
-+                NativeKernelScheduler.Schedule(_nativeState, prio, core, thread.ThreadUid);
-+            }
-         }
- 
-         public void SchedulePrepend(int prio, int core, KThread thread)
-@@ -238,6 +308,12 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-             ScheduledQueue(prio, core).AddFirst(thread.SiblingsPerCore[core]);
- 
-             _scheduledPrioritiesPerCore[core] |= 1L << prio;
-+
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                _threadsByUid[thread.ThreadUid] = thread;
-+                NativeKernelScheduler.SchedulePrepend(_nativeState, prio, core, thread.ThreadUid);
-+            }
-         }
- 
-         public KThread Reschedule(int prio, int core, KThread thread)
-@@ -253,6 +329,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
- 
-             queue.AddLast(thread.SiblingsPerCore[core]);
- 
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                NativeKernelScheduler.Reschedule(_nativeState, prio, core, thread.ThreadUid);
-+            }
-+
-             return queue.First.Value;
-         }
- 
-@@ -271,6 +352,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Threading
-             {
-                 _scheduledPrioritiesPerCore[core] &= ~(1L << prio);
-             }
-+
-+            if (_nativeState != IntPtr.Zero)
-+            {
-+                NativeKernelScheduler.Unschedule(_nativeState, prio, core, thread.ThreadUid);
-+            }
-         }
- 
-         private LinkedList<KThread> SuggestedQueue(int prio, int core)
 diff --git a/src/Ryujinx.HLE/HOS/Kernel/Threading/NativeKernelScheduler.cs b/src/Ryujinx.HLE/HOS/Kernel/Threading/NativeKernelScheduler.cs
 new file mode 100644
 index 0000000000000000000000000000000000000000..1823b49234b77b30e45047bfb43678b949676faa

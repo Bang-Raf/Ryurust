@@ -103,6 +103,38 @@ Limits of this test:
   created (see "Fixed in v0.1.1"), so RomFS lookups in these sessions all
   used the C# path.
 
+## Since v0.1.2 (unreleased)
+
+From measuring every native call site against the C# it replaced (details and
+numbers in [PERFORMANCE_RESEARCH.md](PERFORMANCE_RESEARCH.md)):
+
+- **ASTC decoding now uses `ryu-texture-astc`** (new `NativeTextureAstc`
+  wrapper, called from `AstcDecoder.TryDecodeToRgba8P`). That is the path
+  Ryubing takes when the GPU can't sample ASTC. Output is byte-identical to the
+  C# decoder, including invalid blocks, mip levels, array layers and 3D
+  textures, and is 1.6-2.1x faster. Short or malformed input falls back to
+  the C# decoder.
+- **Native calls that were slower than C# are removed.** One call into a
+  Rust library costs about 7-8 ns before doing any work. These sites did 1-4
+  ns of work, or their result was ignored:
+  - `PipelineUid` hash and equality (Maxwell state): 5.7-6.2x slower.
+  - `TextureCompatibility` checks: 5.7x slower, plus two more native calls per
+    check to pack the keys.
+  - `PhysicalMemory` buffer equality: 3-6x slower below 4 KiB, never faster.
+  - `LinearScanAllocator.GetHighestValueIndex`: the C# loop stops at the first
+    free register.
+  - Audio `MixCommand` and `MixRampCommand`: the ramp was 3.3x slower at real
+    frame sizes (160-240 samples).
+  - `DescriptorSetUpdater`: result unused.
+  - `KPriorityQueue`: state kept twice. Its thread dictionary never dropped
+    entries, so it kept every thread object alive.
+  - `StateUpdateTracker`: register map filled, but never read.
+- **JIT bitmaps** call the native bitset helpers only from 32 words up, where
+  they are faster.
+- Still native: ASTC decoding, the large JIT bitmaps, `ConstantBufferUpdater`,
+  the SurfaceFlinger free-slot search, motion fusion and the RomFS mod path.
+  The middle three have not been measured against C# yet.
+
 ## Fixed in v0.1.2
 
 - New Windows x64 package (`ryurust-<version>-ryubing-<version>-win_x64.zip`),
