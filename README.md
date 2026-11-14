@@ -101,10 +101,11 @@ builds of Ryubing with the Ryurust libraries enabled:
   it and run `Ryujinx.exe`. It needs no .NET or Visual C++ runtime install.
 
 You need your own legally dumped firmware, keys and games; none are
-included. How the package is built is described in
+included. Step-by-step instructions are under [Installation](#installation);
+how the packages are built is described in
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
-The same package is published to GitHub Packages as
+The Linux package is also published to GitHub Packages as
 [`ghcr.io/bang-raf/ryurust`](https://github.com/Bang-Raf/Ryurust/pkgs/container/ryurust).
 It's an OCI artifact holding the release `.tar.xz` and its `.sha256`, not a
 runnable container image. Pull it with [ORAS](https://oras.land):
@@ -114,7 +115,100 @@ oras pull ghcr.io/bang-raf/ryurust:0.1.2
 sha256sum -c ryurust-0.1.2-ryubing-1.3.352-linux_x64.tar.xz.sha256
 ```
 
-## Quick start
+## Installation
+
+The packages are experimental, unofficial builds of Ryubing 1.3.352. Report
+problems to this repository's [issue tracker](https://github.com/Bang-Raf/Ryurust/issues),
+not to the Ryubing project, and attach the log.
+
+**Requirements:**
+
+- An x86_64 (64-bit) CPU and a GPU with an up-to-date Vulkan driver.
+- Linux x86_64, or Windows 10 version 2004 (build 19041) or later.
+- Your own `prod.keys`, firmware and games. None are included.
+
+Neither package needs .NET installed.
+
+### Linux
+
+1. From the [latest release](https://github.com/Bang-Raf/Ryurust/releases/latest),
+   download `ryurust-<version>-ryubing-1.3.352-linux_x64.tar.xz` and its
+   `.sha256` file.
+2. Check the download and extract it:
+
+   ```bash
+   sha256sum -c ryurust-*-linux_x64.tar.xz.sha256
+   ```
+
+   ```bash
+   tar -xJf ryurust-*-linux_x64.tar.xz
+   ```
+
+3. Start it:
+
+   ```bash
+   cd ryurust-*-linux_x64 && ./Ryujinx.sh
+   ```
+
+Emulator data (keys, firmware, saves, settings, logs) is kept in
+`~/.config/Ryujinx/`.
+
+### Windows
+
+1. From the [latest release](https://github.com/Bang-Raf/Ryurust/releases/latest),
+   download `ryurust-<version>-ryubing-1.3.352-win_x64.zip` and its `.sha256`
+   file.
+2. Optionally, check the download in PowerShell. The hash must match the
+   `.sha256` file:
+
+   ```powershell
+   Get-FileHash .\ryurust-*-win_x64.zip -Algorithm SHA256
+   ```
+
+3. Extract the zip to an ordinary folder, for example `C:\Games\Ryurust\`.
+   Ryubing refuses to run from `Program Files`, the `Downloads` folder or a
+   OneDrive folder.
+4. Start `Ryujinx.exe` as a normal user. Ryubing refuses to run as
+   Administrator and only shows a warning.
+5. If Windows shows "Windows protected your PC" (SmartScreen), click
+   **More info**, then **Run anyway**. The executable isn't code-signed.
+   Neither the .NET runtime nor the Visual C++ runtime needs installing.
+
+Emulator data is kept in `%APPDATA%\Ryujinx\`.
+
+### First setup (both systems)
+
+1. **Keys:** **Actions → Install Keys → KEYS...** and pick your `prod.keys`.
+2. **Firmware:** **Actions → Install Firmware → XCI or ZIP...** and pick your
+   firmware dump.
+3. **Games:** **Options → Settings → Interface → Game Directories → Add**,
+   and add the folder that holds your games.
+
+**Portable mode (optional):** create an empty folder named `portable` next to
+`Ryujinx.exe` / `Ryujinx.sh`. All emulator data is then kept in that folder
+instead of `~/.config/Ryujinx/` or `%APPDATA%\Ryujinx\`.
+
+### Check which Rust libraries are used
+
+Open the newest log (**File → Open Logs Folder**) and look for lines starting
+with `Ryurust:`. Each library logs one line the first time the emulator uses
+it, so most appear only once a game is running:
+
+- `Ryurust: using native ryu_audio_mixer 1.0 from …`: the Rust code is in use.
+- `Ryurust: ryu_… not found, using the C# implementation`: that library is
+  missing, so the original C# code runs.
+
+To turn one subsystem off, delete its library from `lib/` (`libryu_*.so` on
+Linux, `ryu_*.dll` on Windows). The emulator then uses the original C# code
+for it.
+
+### Uninstall
+
+Delete the extracted folder. To remove keys, firmware, saves and settings as
+well, delete `~/.config/Ryujinx/` (Linux) or `%APPDATA%\Ryujinx\` (Windows).
+This also deletes your save games.
+
+## Building the crates
 
 Requirements: Rust stable (tested with 1.99.1), x86_64 Linux.
 
